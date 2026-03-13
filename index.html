@@ -1010,12 +1010,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       showAuth();
     }
     // 以降の認証変化を監視（SIGNED_IN/SIGNED_OUTのみ）
+    let appReady = true;
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN') {
+      if (event === 'SIGNED_IN' && appReady) {
+        appReady = false;
         try {
           await loadUserData(session.user);
           showApp();
         } catch(e) { console.error('Sign in load error:', e); }
+        finally { appReady = true; }
       } else if (event === 'SIGNED_OUT') {
         clearState();
         showAuth();
