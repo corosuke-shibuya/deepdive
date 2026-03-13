@@ -987,7 +987,7 @@
 let supabaseClient = null;
 
 let appState = {
-  userName: '', userEmail: '',
+  userName: '', userEmail: '', userId: null,
   history: [],
   persons: {},
   currentResult: null,
@@ -1036,6 +1036,7 @@ async function initSupabase() {
 async function loadUserData(user) {
   appState.userName = user.user_metadata?.name || user.email.split('@')[0];
   appState.userEmail = user.email;
+  appState.userId = user.id;
   appState.prepManual = JSON.parse(localStorage.getItem('deepdive_prepManual') || '[]');
   try {
     appState.history = await dbLoadHistory();
@@ -1123,9 +1124,8 @@ async function dbLoadHistory() {
 }
 
 async function dbSaveMeeting(record) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
   const { error } = await supabaseClient.from('meetings').upsert({
-    id: record.id, user_id: user.id, title: record.title, date: record.date,
+    id: record.id, user_id: appState.userId, title: record.title, date: record.date,
     context: record.context, participants: record.participants,
     log: record.log, score: record.score, data: record.data
   });
@@ -1146,9 +1146,8 @@ async function dbLoadPersons() {
 }
 
 async function dbSavePerson(name, data) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
   const { error } = await supabaseClient.from('persons').upsert({
-    user_id: user.id, name: name, role: data.role || '',
+    user_id: appState.userId, name: name, role: data.role || '',
     profile: data.profile || null,
     meeting_ids: data.meetingIds || [],
     last_seen: data.lastSeen || '',
@@ -1165,9 +1164,8 @@ async function dbLoadMyProfile() {
 }
 
 async function dbSaveMyProfile(profileData) {
-  const { data: { user } } = await supabaseClient.auth.getUser();
   const { error } = await supabaseClient.from('myprofile_cache').upsert({
-    user_id: user.id, data: profileData, updated_at: new Date().toISOString()
+    user_id: appState.userId, data: profileData, updated_at: new Date().toISOString()
   });
   if (error) console.error('dbSaveMyProfile error:', error);
 }
@@ -1799,10 +1797,9 @@ async function clearAllData() {
   if (!confirm('すべての分析履歴・参加者プロフィールを削除しますか？\nこの操作は取り消せません。')) return;
   try {
     showLoading();
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    await supabaseClient.from('meetings').delete().eq('user_id', user.id);
-    await supabaseClient.from('persons').delete().eq('user_id', user.id);
-    await supabaseClient.from('myprofile_cache').delete().eq('user_id', user.id);
+    await supabaseClient.from('meetings').delete().eq('user_id', appState.userId);
+    await supabaseClient.from('persons').delete().eq('user_id', appState.userId);
+    await supabaseClient.from('myprofile_cache').delete().eq('user_id', appState.userId);
     localStorage.removeItem('deepdive_prepManual');
     appState.history = [];
     appState.persons = {};
