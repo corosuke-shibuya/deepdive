@@ -1027,6 +1027,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch(e) {
     console.error('Init error:', e);
     showAuth();
+  } finally {
     document.getElementById('app-loading').style.display = 'none';
   }
 });
