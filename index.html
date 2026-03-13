@@ -984,7 +984,7 @@
 <script>
 
 // ===== SUPABASE + STATE =====
-let supabase = null;
+let supabaseClient = null;
 
 let appState = {
   userName: '', userEmail: '',
@@ -1001,14 +1001,14 @@ let appState = {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await initSupabase();
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { session } } = await supabaseClient.auth.getSession();
     if (session) {
       await loadUserData(session.user);
       showApp();
     } else {
       showAuth();
     }
-    supabase.auth.onAuthStateChange(async (event, session) => {
+    supabaseClient.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN') {
         await loadUserData(session.user);
         showApp();
@@ -1030,7 +1030,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function initSupabase() {
   const config = await fetch('/api/config').then(r => r.json());
-  supabase = supabaseJs.createClient(config.supabaseUrl, config.supabaseAnonKey);
+  supabaseClient = window.supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
 }
 
 async function loadUserData(user) {
@@ -1071,7 +1071,7 @@ async function signIn() {
   const password = document.getElementById('auth-password').value;
   const al = document.getElementById('auth-alert');
   if (!email || !password) { showAlert(al, 'メールアドレスとパスワードを入力してください'); return; }
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) {
     const msg = error.message.includes('Invalid login credentials')
       ? 'メールアドレスまたはパスワードが正しくありません'
@@ -1087,7 +1087,7 @@ async function signUp() {
   const al = document.getElementById('auth-alert');
   if (!name || !email || !password) { showAlert(al, 'すべての項目を入力してください'); return; }
   if (password.length < 8) { showAlert(al, 'パスワードは8文字以上で設定してください'); return; }
-  const { error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+  const { error } = await supabaseClient.auth.signUp({ email, password, options: { data: { name } } });
   if (error) {
     showAlert(al, '登録に失敗しました: ' + error.message);
   } else {
@@ -1097,7 +1097,7 @@ async function signUp() {
 }
 
 async function signOut() {
-  await supabase.auth.signOut();
+  await supabaseClient.auth.signOut();
 }
 
 function toggleAuthMode(e) {
@@ -1114,7 +1114,7 @@ function toggleAuthMode(e) {
 
 // ===== SUPABASE DB =====
 async function dbLoadHistory() {
-  const { data, error } = await supabase.from('meetings').select('*').order('created_at', { ascending: false }).limit(50);
+  const { data, error } = await supabaseClient.from('meetings').select('*').order('created_at', { ascending: false }).limit(50);
   if (error) throw error;
   return (data || []).map(r => ({
     id: r.id, title: r.title, date: r.date, context: r.context,
@@ -1123,8 +1123,8 @@ async function dbLoadHistory() {
 }
 
 async function dbSaveMeeting(record) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('meetings').upsert({
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { error } = await supabaseClient.from('meetings').upsert({
     id: record.id, user_id: user.id, title: record.title, date: record.date,
     context: record.context, participants: record.participants,
     log: record.log, score: record.score, data: record.data
@@ -1133,7 +1133,7 @@ async function dbSaveMeeting(record) {
 }
 
 async function dbLoadPersons() {
-  const { data, error } = await supabase.from('persons').select('*');
+  const { data, error } = await supabaseClient.from('persons').select('*');
   if (error) throw error;
   const persons = {};
   (data || []).forEach(p => {
@@ -1146,8 +1146,8 @@ async function dbLoadPersons() {
 }
 
 async function dbSavePerson(name, data) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('persons').upsert({
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { error } = await supabaseClient.from('persons').upsert({
     user_id: user.id, name: name, role: data.role || '',
     profile: data.profile || null,
     meeting_ids: data.meetingIds || [],
@@ -1159,14 +1159,14 @@ async function dbSavePerson(name, data) {
 }
 
 async function dbLoadMyProfile() {
-  const { data, error } = await supabase.from('myprofile_cache').select('*').single();
+  const { data, error } = await supabaseClient.from('myprofile_cache').select('*').single();
   if (error && error.code !== 'PGRST116') throw error;
   return data?.data || null;
 }
 
 async function dbSaveMyProfile(profileData) {
-  const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('myprofile_cache').upsert({
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { error } = await supabaseClient.from('myprofile_cache').upsert({
     user_id: user.id, data: profileData, updated_at: new Date().toISOString()
   });
   if (error) console.error('dbSaveMyProfile error:', error);
@@ -1784,7 +1784,7 @@ async function saveSettings() {
   const al = document.getElementById('settings-alert');
   if (!name) { showAlert(al, 'お名前を入力してください'); return; }
   try {
-    await supabase.auth.updateUser({ data: { name } });
+    await supabaseClient.auth.updateUser({ data: { name } });
     appState.userName = name;
     document.getElementById('sidebar-user').textContent = name;
     al.textContent = '✅ 保存しました';
@@ -1799,10 +1799,10 @@ async function clearAllData() {
   if (!confirm('すべての分析履歴・参加者プロフィールを削除しますか？\nこの操作は取り消せません。')) return;
   try {
     showLoading();
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('meetings').delete().eq('user_id', user.id);
-    await supabase.from('persons').delete().eq('user_id', user.id);
-    await supabase.from('myprofile_cache').delete().eq('user_id', user.id);
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    await supabaseClient.from('meetings').delete().eq('user_id', user.id);
+    await supabaseClient.from('persons').delete().eq('user_id', user.id);
+    await supabaseClient.from('myprofile_cache').delete().eq('user_id', user.id);
     localStorage.removeItem('deepdive_prepManual');
     appState.history = [];
     appState.persons = {};
