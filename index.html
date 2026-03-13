@@ -1001,15 +1001,16 @@ let appState = {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await initSupabase();
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (session) {
-      await loadUserData(session.user);
-      showApp();
-    } else {
-      showAuth();
-    }
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN') {
+      if (event === 'INITIAL_SESSION') {
+        if (session) {
+          await loadUserData(session.user);
+          showApp();
+        } else {
+          showAuth();
+        }
+        document.getElementById('app-loading').style.display = 'none';
+      } else if (event === 'SIGNED_IN') {
         await loadUserData(session.user);
         showApp();
       } else if (event === 'SIGNED_OUT') {
@@ -1023,7 +1024,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch(e) {
     console.error('Init error:', e);
     showAuth();
-  } finally {
     document.getElementById('app-loading').style.display = 'none';
   }
 });
