@@ -1159,8 +1159,8 @@ async function dbSavePerson(name, data) {
 }
 
 async function dbLoadMyProfile() {
-  const { data, error } = await supabaseClient.from('myprofile_cache').select('*').single();
-  if (error && error.code !== 'PGRST116') throw error;
+  const { data, error } = await supabaseClient.from('myprofile_cache').select('*').maybeSingle();
+  if (error) throw error;
   return data?.data || null;
 }
 
