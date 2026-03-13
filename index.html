@@ -1,0 +1,1942 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deep Dive | AIコミュニケーション分析</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --primary: #1A3A5C;
+      --primary-hover: #243F63;
+      --accent: #2563EB;
+      --accent-light: #DBEAFE;
+      --success: #059669;
+      --success-light: #D1FAE5;
+      --warning: #D97706;
+      --warning-light: #FEF3C7;
+      --danger: #DC2626;
+      --danger-light: #FEE2E2;
+      --sidebar-w: 220px;
+      --bg: #F1F5F9;
+      --card: #FFFFFF;
+      --border: #E2E8F0;
+      --text: #1E293B;
+      --muted: #64748B;
+      --radius: 12px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; display: flex;
+    }
+
+    /* ===== SIDEBAR ===== */
+    #sidebar {
+      width: var(--sidebar-w); background: var(--primary);
+      min-height: 100vh; position: fixed; top:0; left:0;
+      display: flex; flex-direction: column; z-index: 100;
+      transition: transform .3s;
+    }
+    .sidebar-logo {
+      padding: 24px 20px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    .sidebar-logo h1 {
+      color: #fff; font-size: 20px; font-weight: 700; letter-spacing: -.3px;
+    }
+    .sidebar-logo span { color: #93C5FD; font-size: 11px; display:block; margin-top:2px; }
+    .sidebar-nav { padding: 16px 0; flex:1; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 11px 20px; color: rgba(255,255,255,.65);
+      cursor: pointer; font-size: 14px; font-weight: 500;
+      transition: all .2s; border-left: 3px solid transparent;
+    }
+    .nav-item:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .nav-item.active {
+      background: rgba(255,255,255,.12); color: #fff;
+      border-left-color: #60A5FA;
+    }
+    .nav-icon { font-size: 18px; width: 22px; text-align:center; }
+    .sidebar-footer {
+      padding: 16px 20px;
+      border-top: 1px solid rgba(255,255,255,.1);
+      color: rgba(255,255,255,.5); font-size: 12px;
+    }
+
+    /* ===== MAIN CONTENT ===== */
+    #main {
+      margin-left: var(--sidebar-w); flex:1;
+      min-height: 100vh; overflow-x: hidden;
+    }
+    .page { display: none; padding: 32px; max-width: 1100px; }
+    .page.active { display: block; }
+    .page-header { margin-bottom: 28px; }
+    .page-title { font-size: 24px; font-weight: 700; color: var(--text); }
+    .page-subtitle { color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+    /* ===== CARDS ===== */
+    .card {
+      background: var(--card); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+
+    /* ===== SETUP SCREEN ===== */
+    #page-setup {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; padding: 32px;
+    }
+    .setup-box {
+      background: var(--card); border-radius: 20px;
+      border: 1px solid var(--border); padding: 48px;
+      max-width: 520px; width: 100%;
+      box-shadow: 0 8px 32px rgba(0,0,0,.08);
+    }
+    .setup-logo { text-align: center; margin-bottom: 32px; }
+    .setup-logo h1 { font-size: 32px; font-weight: 800; color: var(--primary); }
+    .setup-logo p { color: var(--muted); font-size: 14px; margin-top: 6px; }
+    .logo-badge {
+      display: inline-block; background: var(--accent-light);
+      color: var(--accent); font-size: 11px; font-weight: 600;
+      padding: 3px 10px; border-radius: 20px; margin-bottom: 12px;
+    }
+
+    /* ===== FORMS ===== */
+    .form-group { margin-bottom: 20px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    input, textarea, select {
+      width: 100%; padding: 11px 14px;
+      border: 1.5px solid var(--border); border-radius: 8px;
+      font-size: 14px; font-family: inherit; color: var(--text);
+      background: #fff; transition: border-color .2s;
+      outline: none;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 140px; line-height: 1.6; }
+    .input-hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* ===== BUTTONS ===== */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      gap: 8px; padding: 11px 24px; border-radius: 8px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      border: none; transition: all .2s; font-family: inherit;
+    }
+    .btn-primary {
+      background: var(--accent); color: #fff; width: 100%;
+    }
+    .btn-primary:hover { background: #1D4ED8; transform: translateY(-1px); }
+    .btn-primary:disabled { background: #93C5FD; cursor: not-allowed; transform: none; }
+    .btn-outline {
+      background: transparent; color: var(--accent);
+      border: 1.5px solid var(--accent);
+    }
+    .btn-outline:hover { background: var(--accent-light); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: #047857; }
+    .btn-sm { padding: 7px 16px; font-size: 13px; }
+
+    /* ===== SCORE GAUGE ===== */
+    .score-ring-wrap { text-align: center; padding: 12px 0; }
+    .score-ring {
+      position: relative; display: inline-block;
+      width: 120px; height: 120px;
+    }
+    .score-ring svg { transform: rotate(-90deg); }
+    .score-ring-num {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      font-size: 28px; font-weight: 800;
+    }
+    .score-ring-label { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+    /* ===== STAT CARDS ===== */
+    .stat-card {
+      background: var(--card); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 20px;
+      display: flex; align-items: center; gap: 16px;
+    }
+    .stat-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .stat-val { font-size: 26px; font-weight: 700; }
+    .stat-label { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .stat-change { font-size: 12px; font-weight: 600; margin-top: 2px; }
+    .up { color: var(--success); }
+    .down { color: var(--danger); }
+
+    /* ===== BADGES ===== */
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 700;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .badge-high { background: var(--danger-light); color: var(--danger); }
+    .badge-medium { background: var(--warning-light); color: var(--warning); }
+    .badge-low { background: var(--success-light); color: var(--success); }
+
+    /* ===== GAP CARDS ===== */
+    .gap-card {
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px; margin-bottom: 14px; background: #fff;
+    }
+    .gap-card.high { border-left: 4px solid var(--danger); }
+    .gap-card.medium { border-left: 4px solid var(--warning); }
+    .gap-card.low { border-left: 4px solid var(--success); }
+    .gap-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .gap-type { font-size: 13px; font-weight: 600; color: var(--text); }
+    .gap-section { margin-top: 10px; }
+    .gap-section-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--muted); margin-bottom: 4px;
+    }
+    .gap-section-text { font-size: 13px; line-height: 1.6; color: var(--text); }
+    .gap-intent { background: var(--accent-light); border-radius: 6px; padding: 8px 12px; }
+    .gap-reception { background: #FFF7ED; border-radius: 6px; padding: 8px 12px; }
+
+    /* ===== ACTION CARDS ===== */
+    .action-card {
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 18px; margin-bottom: 14px; background: #fff;
+      display: flex; gap: 16px;
+    }
+    .action-num {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+    }
+    .action-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+    .action-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 10px; }
+    .action-example {
+      background: #F0FDF4; border: 1px solid #A7F3D0;
+      border-radius: 8px; padding: 10px 14px; font-size: 13px;
+      color: #065F46; line-height: 1.6; margin-bottom: 8px;
+    }
+    .action-example::before { content: '💬 例文: '; font-weight: 700; }
+    .action-impact {
+      font-size: 12px; color: var(--success); font-weight: 600;
+    }
+    .action-impact::before { content: '✅ '; }
+
+    /* ===== CHECKLIST ===== */
+    .checklist-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+      font-size: 14px; line-height: 1.5;
+    }
+    .checklist-item:last-child { border-bottom: none; }
+    .checklist-check {
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 2px solid var(--accent); display: flex;
+      align-items: center; justify-content: center; flex-shrink: 0;
+      cursor: pointer; transition: all .2s;
+    }
+    .checklist-check.checked { background: var(--accent); border-color: var(--accent); }
+    .checklist-check.checked::after { content: '✓'; color: #fff; font-size: 12px; font-weight: 700; }
+
+    /* ===== HISTORY TABLE ===== */
+    .history-list { display: flex; flex-direction: column; gap: 12px; }
+    .history-item {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 20px;
+      display: flex; align-items: center; gap: 20px;
+      cursor: pointer; transition: all .2s;
+    }
+    .history-item:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(37,99,235,.1); }
+    .history-score {
+      width: 52px; height: 52px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 800; flex-shrink: 0;
+    }
+    .history-info { flex:1; }
+    .history-title { font-size: 14px; font-weight: 600; }
+    .history-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .history-arrow { color: var(--muted); font-size: 18px; }
+
+    /* ===== LOADING ===== */
+    .loading-overlay {
+      position: fixed; inset: 0; background: rgba(255,255,255,.9);
+      display: none; align-items: center; justify-content: center;
+      z-index: 999; flex-direction: column; gap: 16px;
+    }
+    .loading-overlay.show { display: flex; }
+    .spinner {
+      width: 48px; height: 48px; border: 4px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { font-size: 14px; color: var(--muted); font-weight: 500; }
+    .loading-steps { font-size: 13px; color: var(--accent); }
+
+    /* ===== PROGRESS BARS ===== */
+    .progress-wrap { margin-bottom: 12px; }
+    .progress-label {
+      display: flex; justify-content: space-between;
+      font-size: 13px; margin-bottom: 5px;
+    }
+    .progress-bar-bg { background: var(--border); border-radius: 99px; height: 8px; }
+    .progress-bar {
+      height: 8px; border-radius: 99px; transition: width 1s ease;
+    }
+
+    /* ===== STRENGTHS ===== */
+    .strength-item {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 13px; line-height: 1.6;
+    }
+    .strength-item:last-child { border-bottom: none; }
+    .strength-icon { color: var(--success); font-size: 16px; flex-shrink: 0; }
+
+    /* ===== SUMMARY BOX ===== */
+    .summary-box {
+      background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
+      border: 1px solid #BFDBFE; border-radius: 12px;
+      padding: 20px; font-size: 14px; line-height: 1.8;
+      color: var(--primary);
+    }
+    .summary-box::before {
+      content: '📊 AI分析サマリー';
+      display: block; font-size: 12px; font-weight: 700;
+      color: var(--accent); margin-bottom: 10px;
+      text-transform: uppercase; letter-spacing: .5px;
+    }
+
+    /* ===== ALERT ===== */
+    .alert {
+      padding: 12px 16px; border-radius: 8px;
+      font-size: 13px; margin-bottom: 16px; display: none;
+    }
+    .alert.show { display: block; }
+    .alert-error { background: var(--danger-light); color: var(--danger); border: 1px solid #FCA5A5; }
+    .alert-success { background: var(--success-light); color: var(--success); border: 1px solid #6EE7B7; }
+
+    /* ===== TABS ===== */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 24px; }
+    .tab {
+      padding: 10px 20px; font-size: 14px; font-weight: 600;
+      color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; transition: all .2s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      text-align: center; padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+    .empty-state p { font-size: 14px; }
+
+    /* ===== SCORE COLOR UTILS ===== */
+    .color-good { color: var(--success); }
+    .color-ok { color: var(--warning); }
+    .color-poor { color: var(--danger); }
+    .bg-good { background: var(--success); }
+    .bg-ok { background: var(--warning); }
+    .bg-poor { background: var(--danger); }
+
+    /* ===== RESULTS HEADER ===== */
+    .results-meta {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 8px;
+    }
+    .results-date { font-size: 13px; color: var(--muted); }
+
+    /* ===== MYPROFILE LOADING STEPS ===== */
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .loading-step-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px; border-radius: 8px; margin-bottom: 8px;
+      font-size: 13px; color: var(--muted); transition: all .3s;
+      background: #F8FAFC;
+    }
+    .loading-step-item.active {
+      background: var(--accent-light); color: var(--accent); font-weight: 600;
+    }
+    .loading-step-item.done {
+      background: var(--success-light); color: var(--success);
+    }
+    .lstep-icon { font-size: 18px; flex-shrink:0; }
+    .lstep-text { flex:1; text-align:left; }
+    .lstep-check { flex-shrink:0; }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 768px) {
+      #sidebar { transform: translateX(-100%); }
+      #sidebar.open { transform: none; }
+      #main { margin-left: 0; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .page { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== SIDEBAR ===== -->
+<nav id="sidebar">
+  <div class="sidebar-logo">
+    <h1>🔍 Deep Dive</h1>
+    <span>AIコミュニケーション分析</span>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">📊</span> ダッシュボード
+    </div>
+    <div class="nav-item" data-page="analysis">
+      <span class="nav-icon">🔄</span> 会議振り返り
+    </div>
+    <div class="nav-item" data-page="prep">
+      <span class="nav-icon">🎯</span> 会議準備
+    </div>
+    <div class="nav-item" data-page="myprofile">
+      <span class="nav-icon">🪞</span> マイプロフィール
+    </div>
+    <div class="nav-item" data-page="history">
+      <span class="nav-icon">📋</span> 分析履歴
+    </div>
+    <div class="nav-item" data-page="settings">
+      <span class="nav-icon">⚙️</span> 設定
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <div id="sidebar-user" style="font-weight:600;color:rgba(255,255,255,.75);margin-bottom:4px;">—</div>
+    <div>Deep Dive v1.0</div>
+  </div>
+</nav>
+
+<!-- ===== MAIN AREA ===== -->
+<main id="main">
+
+  <!-- AUTH PAGE -->
+  <div id="page-auth" style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px">
+    <div class="setup-box" style="max-width:440px">
+      <div class="setup-logo">
+        <div class="logo-badge">β版</div>
+        <h1>🔍 Deep Dive</h1>
+        <p>AIを活用したコミュニケーション<br>スキル向上ツール</p>
+      </div>
+      <div id="auth-alert" class="alert"></div>
+
+      <!-- ログインフォーム -->
+      <div id="auth-login">
+        <div class="form-group">
+          <label>メールアドレス</label>
+          <input type="email" id="auth-email" placeholder="example@email.com" />
+        </div>
+        <div class="form-group">
+          <label>パスワード</label>
+          <input type="password" id="auth-password" placeholder="パスワードを入力"
+            onkeydown="if(event.key==='Enter')signIn()" />
+        </div>
+        <button class="btn btn-primary" onclick="signIn()">🚀 ログイン</button>
+        <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
+          アカウントをお持ちでない方は
+          <a href="#" onclick="toggleAuthMode(event)" style="color:var(--accent)">新規登録</a>
+        </p>
+      </div>
+
+      <!-- 新規登録フォーム -->
+      <div id="auth-signup" style="display:none">
+        <div class="form-group">
+          <label>お名前</label>
+          <input type="text" id="signup-name" placeholder="例：田中 良美" />
+        </div>
+        <div class="form-group">
+          <label>メールアドレス</label>
+          <input type="email" id="signup-email" placeholder="example@email.com" />
+        </div>
+        <div class="form-group">
+          <label>パスワード（8文字以上）</label>
+          <input type="password" id="signup-password" placeholder="パスワードを設定" />
+        </div>
+        <button class="btn btn-primary" onclick="signUp()">✨ アカウントを作成</button>
+        <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted)">
+          すでにアカウントをお持ちの方は
+          <a href="#" onclick="toggleAuthMode(event)" style="color:var(--accent)">ログイン</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- DASHBOARD PAGE -->
+  <div id="page-dashboard" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">ダッシュボード</h2>
+      <p class="page-subtitle">あなたのコミュニケーションスキルの進捗</p>
+    </div>
+
+    <!-- Stats row -->
+    <div class="grid-3" style="margin-bottom:20px">
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#DBEAFE">📈</div>
+        <div>
+          <div class="stat-val" id="dash-total-score">—</div>
+          <div class="stat-label">現在の平均スコア</div>
+          <div class="stat-change" id="dash-score-change"></div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#D1FAE5">📝</div>
+        <div>
+          <div class="stat-val" id="dash-total-sessions">0</div>
+          <div class="stat-label">累計分析回数</div>
+          <div class="stat-change" id="dash-streak"></div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background:#FEF3C7">🎯</div>
+        <div>
+          <div class="stat-val" id="dash-best-skill">—</div>
+          <div class="stat-label">最も成長した項目</div>
+          <div class="stat-change up" id="dash-best-skill-sub"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:20px">
+      <!-- スコア推移 -->
+      <div class="card">
+        <p class="card-title">📈 スコア推移</p>
+        <canvas id="chart-trend" height="180"></canvas>
+        <p id="trend-empty" style="text-align:center;color:var(--muted);font-size:13px;padding:40px 0">
+          分析を2回以上行うとグラフが表示されます
+        </p>
+      </div>
+      <!-- スキルバランス -->
+      <div class="card">
+        <p class="card-title">🕸 スキルバランス</p>
+        <canvas id="chart-radar" height="180"></canvas>
+        <p id="radar-empty" style="text-align:center;color:var(--muted);font-size:13px;padding:40px 0">
+          最初の分析を行うと表示されます
+        </p>
+      </div>
+    </div>
+
+    <!-- Recent -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <p class="card-title" style="margin:0">🕐 最近の分析</p>
+        <button class="btn btn-outline btn-sm" onclick="navigate('analysis')">+ 会議振り返り</button>
+      </div>
+      <div id="dash-recent"></div>
+    </div>
+  </div>
+
+  <!-- ANALYSIS PAGE -->
+  <div id="page-analysis" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">🔄 会議振り返り</h2>
+      <p class="page-subtitle">会議ログを貼り付けてAIに分析させましょう</p>
+    </div>
+
+    <div id="analysis-alert" class="alert alert-error"></div>
+
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card">
+        <p class="card-title">📋 基本情報</p>
+        <div class="form-group">
+          <label>会議・場面のタイトル</label>
+          <input type="text" id="input-title" placeholder="例：Q4予算調整の1on1" />
+        </div>
+        <div class="form-group">
+          <label>状況・背景</label>
+          <textarea id="input-context" style="min-height:90px"
+            placeholder="例：部下からリソース増員を相談された。私は予算の関係で即答できなかった。"></textarea>
+        </div>
+        <div class="form-group">
+          <label>参加者</label>
+          <input type="text" id="input-participants"
+            placeholder="例：自分（部長）、田中さん（マネージャー）" />
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">💬 会議ログ <span style="color:var(--danger)">*</span></p>
+        <div class="form-group">
+          <textarea id="input-log" style="min-height:220px"
+            placeholder="会議の会話を貼り付けてください。
+
+例：
+田中：「先月から残業が続いています。プロジェクトのリソースを増やしてもらえませんか」
+自分：「状況はわかった。ただ今期の予算はもう決まってるから」
+田中：「でも、このままでは期日に間に合わないかもしれないです」
+自分：「とりあえず今週中に進捗共有して」
+田中：「はい、わかりました」"></textarea>
+        </div>
+        <p class="input-hint">
+          💡 より詳しいログほど、精度の高い分析ができます（最低50文字）
+        </p>
+      </div>
+    </div>
+
+    <div style="text-align:center">
+      <button class="btn btn-primary" style="width:auto;padding:14px 48px;font-size:16px"
+        onclick="runAnalysis()">
+        🔍 AIで分析する
+      </button>
+    </div>
+  </div>
+
+  <!-- RESULTS PAGE -->
+  <div id="page-results" class="page" style="display:none">
+    <div class="page-header">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2 class="page-title" id="result-title">分析結果</h2>
+          <p class="results-meta">
+            <span class="results-date" id="result-date"></span>
+          </p>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="navigate('analysis')">
+          ＋ 会議振り返り
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary & Overall Score -->
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card">
+        <div class="score-ring-wrap">
+          <div class="score-ring">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="#E2E8F0" stroke-width="10"/>
+              <circle id="score-circle" cx="60" cy="60" r="52" fill="none"
+                stroke="#2563EB" stroke-width="10"
+                stroke-dasharray="327" stroke-dashoffset="327"
+                stroke-linecap="round" style="transition:stroke-dashoffset 1.2s ease"/>
+            </svg>
+            <div class="score-ring-num" id="result-overall-num">—</div>
+          </div>
+          <div class="score-ring-label">総合コミュニケーションスコア</div>
+        </div>
+
+        <div style="margin-top:16px">
+          <div id="result-subscores"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">🕸 スキルレーダー</p>
+        <canvas id="chart-result-radar" height="220"></canvas>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div style="margin-bottom:20px">
+      <div class="summary-box" id="result-summary"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" data-tab="gaps" onclick="switchTab('gaps', this)">
+        🔍 ズレの分析
+      </div>
+      <div class="tab" data-tab="strengths" onclick="switchTab('strengths', this)">
+        ⭐ 良かった点
+      </div>
+      <div class="tab" data-tab="actions" onclick="switchTab('actions', this)">
+        🎯 改善アクション
+      </div>
+      <div class="tab" data-tab="checklist" onclick="switchTab('checklist', this)">
+        ✅ 次回チェックリスト
+      </div>
+      <div class="tab" data-tab="persons" onclick="switchTab('persons', this)">
+        👥 参加者分析
+      </div>
+    </div>
+
+    <div id="tab-gaps" class="tab-content">
+      <div id="result-gaps"></div>
+    </div>
+    <div id="tab-strengths" class="tab-content" style="display:none">
+      <div class="card"><div id="result-strengths"></div></div>
+    </div>
+    <div id="tab-actions" class="tab-content" style="display:none">
+      <div id="result-actions"></div>
+    </div>
+    <div id="tab-checklist" class="tab-content" style="display:none">
+      <div class="card"><div id="result-checklist"></div></div>
+    </div>
+    <div id="tab-persons" class="tab-content" style="display:none">
+      <div id="result-persons"></div>
+    </div>
+  </div>
+
+  <!-- MEETING PREP PAGE -->
+  <div id="page-prep" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">🎯 会議準備</h2>
+      <p class="page-subtitle">入力情報をもとに、AIが会議の戦略・想定問答・チェックリストを作成します</p>
+    </div>
+
+    <!-- 何が生成されるか案内 -->
+    <div style="background:var(--accent-light);border:1px solid #BFDBFE;border-radius:10px;padding:14px 20px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+      <span style="font-size:13px;font-weight:600;color:var(--accent)">生成されるアウトプット：</span>
+      <span style="font-size:12px;color:var(--primary)">🚪 会議の入り方</span>
+      <span style="font-size:12px;color:var(--primary)">💬 キーメッセージ×伝え方</span>
+      <span style="font-size:12px;color:var(--primary)">⚠️ リスク・懸念点</span>
+      <span style="font-size:12px;color:var(--primary)">✅ 事前チェックリスト</span>
+    </div>
+
+    <div id="prep-alert" class="alert alert-error"></div>
+
+    <div class="grid-2" style="margin-bottom:20px">
+
+      <!-- 左：会議情報のみ -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <p class="card-title">📋 会議の基本情報</p>
+
+          <div class="form-group">
+            <label>この会議で達成したいこと <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="prep-goal"
+              placeholder="例：来週の予算会議までに山田部長から増員の承認をもらう" />
+            <p class="input-hint">→ 「誰に」「何を」「いつまでに」を入れると戦略が具体的になります</p>
+          </div>
+
+          <div class="form-group">
+            <label>話したい内容・伝えたいポイント</label>
+            <textarea id="prep-agenda" style="min-height:110px"
+              placeholder="例：&#10;・現状：エンジニア2名が毎週20時間超の残業、品質リスクが高まっている&#10;・要望：2名増員（または外部委託）の承認&#10;・根拠：競合他社のリソース配分データと、このままの損失試算を提示する"></textarea>
+            <p class="input-hint">→ 伝えたい順番・強調したい根拠・代替案があれば書いておくと想定問答が精度UP</p>
+          </div>
+
+          <div class="form-group">
+            <label>想定される懸念・反論（任意）</label>
+            <textarea id="prep-concerns" style="min-height:90px"
+              placeholder="例：&#10;・「予算が足りない」と言われそう&#10;・「今期は採用を凍結している」と言われる可能性がある&#10;・「外部委託はセキュリティリスクがある」と突っ込まれるかも"></textarea>
+            <p class="input-hint">→ 先に書いておくと、そこへの切り返しや代替案も生成されます</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：手動入力 + 分析済み参加者 + 追加済みプロフィール -->
+      <div style="display:flex;flex-direction:column;gap:16px">
+
+        <!-- 手動入力（右上） -->
+        <div class="card">
+          <p class="card-title">✏️ 初めて会う方・手動で登録する</p>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>名前</label>
+            <input type="text" id="manual-name" placeholder="例：山田部長" />
+          </div>
+          <div class="form-group" style="margin-bottom:8px">
+            <label>役職・立場</label>
+            <input type="text" id="manual-role" placeholder="例：経営企画部長（予算承認権あり）" />
+          </div>
+          <div class="form-group">
+            <label>知っている特徴・注意点</label>
+            <textarea id="manual-traits" style="min-height:80px"
+              placeholder="例：&#10;・数字とエビデンスを重視する&#10;・感情論より論理で話す方が刺さる&#10;・急かすと拒否反応を示す傾向がある&#10;・部下の残業問題には敏感"></textarea>
+            <p class="input-hint">→ 知っているほど、より個人に合わせた戦略が生成されます</p>
+          </div>
+          <button class="btn btn-outline btn-sm" style="width:100%" onclick="addManualPerson()">
+            ＋ この参加者を追加する
+          </button>
+        </div>
+
+        <!-- 追加済み参加者プロフィール（分析済み選択 + 手動追加の一覧） -->
+        <div class="card">
+          <p class="card-title">👥 追加済み参加者プロフィール</p>
+          <p class="input-hint" style="margin-bottom:10px">「会議振り返り → 参加者分析」で登録済みの人物が選べます</p>
+          <div id="prep-person-list">
+            <p style="color:var(--muted);font-size:13px">まだ分析済みの人物がいません</p>
+          </div>
+        </div>
+
+        <!-- 非表示：JS用 -->
+        <div id="prep-selected-profiles" style="display:none"></div>
+      </div>
+    </div>
+
+    <div style="text-align:center;margin-bottom:32px">
+      <button class="btn btn-primary" style="width:auto;padding:14px 48px;font-size:16px"
+        onclick="runMeetingPrep()">
+        🎯 戦略を立案する
+      </button>
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">参加者がいなくても会議の目的だけで立案できます</p>
+    </div>
+
+    <!-- Prep Results -->
+    <div id="prep-results" style="display:none">
+      <div style="border-left:4px solid var(--accent);padding:14px 18px;background:var(--accent-light);border-radius:0 10px 10px 0;margin-bottom:20px">
+        <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🎯 この会議の攻略ポイント</div>
+        <div id="prep-summary" style="font-size:14px;line-height:1.7;color:var(--primary)"></div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:20px">
+        <div class="card">
+          <p class="card-title">🚪 会議の入り方・アイスブレイク</p>
+          <p id="prep-opening" style="font-size:14px;line-height:1.7;color:var(--text)"></p>
+        </div>
+        <div class="card">
+          <p class="card-title">🏁 締め方・次のアクション設定</p>
+          <p id="prep-closing" style="font-size:14px;line-height:1.7;color:var(--text)"></p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <p class="card-title">💬 キーメッセージと伝え方</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">各メッセージの伝え方と、相手の想定反応を確認しておきましょう</p>
+        <div id="prep-messages"></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <p class="card-title">⚠️ リスク・懸念点と対処法</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">この会議で注意すべき点と、対処の方向性</p>
+        <div id="prep-risks"></div>
+      </div>
+
+      <div class="card">
+        <p class="card-title">✅ 会議前チェックリスト</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">会議までに準備しておくこと</p>
+        <div id="prep-checklist"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MY PROFILE PAGE -->
+  <div id="page-myprofile" class="page" style="display:none">
+    <div class="page-header">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <h2 class="page-title">🪞 マイプロフィール</h2>
+          <p class="page-subtitle">AIがあなたのコミュニケーション特性を分析します</p>
+        </div>
+        <button class="btn btn-outline btn-sm" id="myprofile-regen-btn" onclick="generateMyProfile(true)" style="display:none">
+          🔄 再分析する
+        </button>
+      </div>
+    </div>
+
+    <!-- State 1: データなし -->
+    <div id="myprofile-empty" style="display:none">
+      <div class="card" style="text-align:center;padding:60px 32px">
+        <div style="font-size:56px;margin-bottom:20px">🪞</div>
+        <h3 style="font-size:18px;margin-bottom:12px">まだ分析データがありません</h3>
+        <p style="color:var(--muted);font-size:14px;margin-bottom:24px">
+          会議振り返りを2回以上行うと、<br>あなた専用のコミュニケーションプロフィールが生成されます。
+        </p>
+        <button class="btn btn-primary" style="width:auto" onclick="navigate('analysis')">
+          🔄 最初の会議を振り返る
+        </button>
+      </div>
+    </div>
+
+    <!-- State 2: 生成中 -->
+    <div id="myprofile-loading" style="display:none">
+      <div class="card" style="text-align:center;padding:60px 32px">
+        <div style="font-size:48px;margin-bottom:24px;animation:pulse 1.5s ease-in-out infinite">🧠</div>
+        <h3 style="font-size:18px;margin-bottom:8px">AIがあなたを分析しています</h3>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:32px">過去の会議データから特性を読み解いています</p>
+
+        <div style="max-width:400px;margin:0 auto">
+          <div class="loading-step-item active" id="lstep-0">
+            <span class="lstep-icon">📊</span>
+            <span class="lstep-text">分析データを集計中...</span>
+            <span class="lstep-check" style="display:none">✅</span>
+          </div>
+          <div class="loading-step-item" id="lstep-1">
+            <span class="lstep-icon">🔍</span>
+            <span class="lstep-text">コミュニケーションパターンを解析中...</span>
+            <span class="lstep-check" style="display:none">✅</span>
+          </div>
+          <div class="loading-step-item" id="lstep-2">
+            <span class="lstep-icon">💡</span>
+            <span class="lstep-text">強み・弱みを特定中...</span>
+            <span class="lstep-check" style="display:none">✅</span>
+          </div>
+          <div class="loading-step-item" id="lstep-3">
+            <span class="lstep-icon">🎯</span>
+            <span class="lstep-text">改善ヒントを生成中...</span>
+            <span class="lstep-check" style="display:none">✅</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- State 3: 結果 -->
+    <div id="myprofile-result" style="display:none">
+      <!-- タイプバナー -->
+      <div id="myprofile-type-banner" style="background:linear-gradient(135deg,var(--primary),#2563EB);border-radius:16px;padding:28px 32px;margin-bottom:20px;display:flex;align-items:center;gap:24px;color:#fff">
+        <div id="myprofile-type-icon" style="font-size:56px;line-height:1"></div>
+        <div>
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;opacity:.7;margin-bottom:6px">あなたのコミュニケーションタイプ</div>
+          <div id="myprofile-type-name" style="font-size:24px;font-weight:800;margin-bottom:6px"></div>
+          <div id="myprofile-type-desc" style="font-size:14px;opacity:.85;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <!-- 一言マントラ -->
+      <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:16px 20px;margin-bottom:20px;display:flex;align-items:center;gap:12px">
+        <span style="font-size:24px">✨</span>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--warning);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">あなたへのメッセージ</div>
+          <div id="myprofile-mantra" style="font-size:16px;font-weight:700;color:#92400E"></div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:20px">
+        <!-- 強み -->
+        <div class="card">
+          <p class="card-title">⭐ あなたの強み</p>
+          <div id="myprofile-strengths"></div>
+        </div>
+        <!-- ブラインドスポット -->
+        <div class="card">
+          <p class="card-title">⚠️ 陥りがちなパターン</p>
+          <div id="myprofile-blindspots"></div>
+        </div>
+      </div>
+
+      <!-- 成長領域 -->
+      <div class="card" style="margin-bottom:20px">
+        <p class="card-title">📈 成長エリア別スコア</p>
+        <div id="myprofile-growth"></div>
+      </div>
+
+      <!-- 総合評価 + 次のフォーカス -->
+      <div class="grid-2" style="margin-bottom:20px">
+        <div class="summary-box" id="myprofile-assessment"></div>
+        <div style="background:linear-gradient(135deg,#F0FDF4,#DCFCE7);border:1px solid #86EFAC;border-radius:12px;padding:20px">
+          <div style="font-size:11px;font-weight:700;color:var(--success);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🎯 今すぐ取り組む最優先アクション</div>
+          <div id="myprofile-nextfocus" style="font-size:15px;font-weight:700;color:#065F46;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <div style="text-align:center">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:8px" id="myprofile-generated-at"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY PAGE -->
+  <div id="page-history" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">📋 分析履歴</h2>
+      <p class="page-subtitle">過去の分析を振り返りましょう</p>
+    </div>
+    <div id="history-list"></div>
+  </div>
+
+  <!-- SETTINGS PAGE -->
+  <div id="page-settings" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">⚙️ 設定</h2>
+    </div>
+    <div class="card" style="max-width:520px">
+      <p class="card-title">アカウント情報</p>
+      <div class="form-group">
+        <label>お名前（表示名）</label>
+        <input type="text" id="settings-name" />
+      </div>
+      <div class="form-group">
+        <label>メールアドレス</label>
+        <input type="email" id="settings-email" readonly
+          style="background:#F8FAFC;color:var(--muted);cursor:default" />
+      </div>
+      <div id="settings-alert" class="alert"></div>
+      <button class="btn btn-primary" style="width:auto" onclick="saveSettings()">
+        💾 保存する
+      </button>
+      <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--border)">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:12px">⚠️ アカウント操作</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="background:#FEF3C7;color:#92400E;border:1px solid #FDE68A"
+            onclick="signOut()">
+            🚪 ログアウト
+          </button>
+          <button class="btn btn-sm" style="background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5"
+            onclick="clearAllData()">
+            🗑 すべてのデータを削除
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- App Init Loading -->
+<div id="app-loading" style="display:flex;position:fixed;inset:0;background:#fff;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:12px">
+  <div class="spinner"></div>
+  <div style="font-size:13px;color:var(--muted)">起動中...</div>
+</div>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text">AIが分析しています...</div>
+  <div class="loading-steps" id="loading-step">会議ログを読み込み中</div>
+</div>
+
+<script>
+
+// ===== SUPABASE + STATE =====
+let supabase = null;
+
+let appState = {
+  userName: '', userEmail: '',
+  history: [],
+  persons: {},
+  currentResult: null,
+  prepSelected: [],
+  prepManual: [],
+  myprofileCache: null,
+  charts: {}
+};
+
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await initSupabase();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      await loadUserData(session.user);
+      showApp();
+    } else {
+      showAuth();
+    }
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN') {
+        await loadUserData(session.user);
+        showApp();
+      } else if (event === 'SIGNED_OUT') {
+        clearState();
+        showAuth();
+      }
+    });
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.addEventListener('click', () => navigate(el.dataset.page));
+    });
+  } catch(e) {
+    console.error('Init error:', e);
+    showAuth();
+  } finally {
+    document.getElementById('app-loading').style.display = 'none';
+  }
+});
+
+async function initSupabase() {
+  const config = await fetch('/api/config').then(r => r.json());
+  supabase = supabaseJs.createClient(config.supabaseUrl, config.supabaseAnonKey);
+}
+
+async function loadUserData(user) {
+  appState.userName = user.user_metadata?.name || user.email.split('@')[0];
+  appState.userEmail = user.email;
+  appState.prepManual = JSON.parse(localStorage.getItem('deepdive_prepManual') || '[]');
+  try {
+    appState.history = await dbLoadHistory();
+    appState.persons = await dbLoadPersons();
+    appState.myprofileCache = await dbLoadMyProfile();
+  } catch(e) {
+    console.error('DB load error:', e);
+    appState.history = [];
+    appState.persons = {};
+    appState.myprofileCache = null;
+  }
+}
+
+function clearState() {
+  appState.userName = '';
+  appState.userEmail = '';
+  appState.history = [];
+  appState.persons = {};
+  appState.myprofileCache = null;
+  appState.prepSelected = [];
+  appState.prepManual = [];
+  Object.values(appState.charts).forEach(c => c?.destroy?.());
+  appState.charts = {};
+}
+
+function savePrepManual() {
+  localStorage.setItem('deepdive_prepManual', JSON.stringify(appState.prepManual));
+}
+
+// ===== SUPABASE AUTH =====
+async function signIn() {
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const al = document.getElementById('auth-alert');
+  if (!email || !password) { showAlert(al, 'メールアドレスとパスワードを入力してください'); return; }
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    const msg = error.message.includes('Invalid login credentials')
+      ? 'メールアドレスまたはパスワードが正しくありません'
+      : error.message;
+    showAlert(al, 'ログインに失敗しました: ' + msg);
+  }
+}
+
+async function signUp() {
+  const name = document.getElementById('signup-name').value.trim();
+  const email = document.getElementById('signup-email').value.trim();
+  const password = document.getElementById('signup-password').value;
+  const al = document.getElementById('auth-alert');
+  if (!name || !email || !password) { showAlert(al, 'すべての項目を入力してください'); return; }
+  if (password.length < 8) { showAlert(al, 'パスワードは8文字以上で設定してください'); return; }
+  const { error } = await supabase.auth.signUp({ email, password, options: { data: { name } } });
+  if (error) {
+    showAlert(al, '登録に失敗しました: ' + error.message);
+  } else {
+    al.textContent = '✅ 確認メールを送りました。メール内のリンクをクリックして登録を完了してください。';
+    al.className = 'alert alert-success show';
+  }
+}
+
+async function signOut() {
+  await supabase.auth.signOut();
+}
+
+function toggleAuthMode(e) {
+  e.preventDefault();
+  const login = document.getElementById('auth-login');
+  const signup = document.getElementById('auth-signup');
+  hideAlert(document.getElementById('auth-alert'));
+  if (login.style.display === 'none') {
+    login.style.display = 'block'; signup.style.display = 'none';
+  } else {
+    login.style.display = 'none'; signup.style.display = 'block';
+  }
+}
+
+// ===== SUPABASE DB =====
+async function dbLoadHistory() {
+  const { data, error } = await supabase.from('meetings').select('*').order('created_at', { ascending: false }).limit(50);
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id: r.id, title: r.title, date: r.date, context: r.context,
+    participants: r.participants, log: r.log, score: r.score, data: r.data
+  }));
+}
+
+async function dbSaveMeeting(record) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('meetings').upsert({
+    id: record.id, user_id: user.id, title: record.title, date: record.date,
+    context: record.context, participants: record.participants,
+    log: record.log, score: record.score, data: record.data
+  });
+  if (error) console.error('dbSaveMeeting error:', error);
+}
+
+async function dbLoadPersons() {
+  const { data, error } = await supabase.from('persons').select('*');
+  if (error) throw error;
+  const persons = {};
+  (data || []).forEach(p => {
+    persons[p.name] = {
+      name: p.name, role: p.role, profile: p.profile,
+      meetingIds: p.meeting_ids || [], lastSeen: p.last_seen, enough_data: p.enough_data
+    };
+  });
+  return persons;
+}
+
+async function dbSavePerson(name, data) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('persons').upsert({
+    user_id: user.id, name: name, role: data.role || '',
+    profile: data.profile || null,
+    meeting_ids: data.meetingIds || [],
+    last_seen: data.lastSeen || '',
+    enough_data: data.enough_data || false,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,name' });
+  if (error) console.error('dbSavePerson error:', error);
+}
+
+async function dbLoadMyProfile() {
+  const { data, error } = await supabase.from('myprofile_cache').select('*').single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data?.data || null;
+}
+
+async function dbSaveMyProfile(profileData) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('myprofile_cache').upsert({
+    user_id: user.id, data: profileData, updated_at: new Date().toISOString()
+  });
+  if (error) console.error('dbSaveMyProfile error:', error);
+}
+
+// ===== NAVIGATION =====
+function showAuth() {
+  document.getElementById('page-auth').style.display = 'flex';
+  document.getElementById('sidebar').style.display = 'none';
+  document.getElementById('main').style.marginLeft = '0';
+}
+
+function showApp() {
+  document.getElementById('page-auth').style.display = 'none';
+  document.getElementById('sidebar').style.display = 'flex';
+  document.getElementById('main').style.marginLeft = 'var(--sidebar-w)';
+  document.getElementById('sidebar-user').textContent = appState.userName || 'ユーザー';
+  navigate('dashboard');
+}
+
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const el = document.getElementById(`page-${page}`);
+  if (el) el.style.display = 'block';
+  const nav = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (nav) nav.classList.add('active');
+
+  if (page === 'dashboard') renderDashboard();
+  if (page === 'history') renderHistory();
+  if (page === 'prep') renderPrepPage();
+  if (page === 'myprofile') initMyProfile();
+  if (page === 'settings') {
+    document.getElementById('settings-name').value = appState.userName;
+    document.getElementById('settings-email').value = appState.userEmail;
+  }
+}
+
+// ===== ANALYSIS =====
+async function runAnalysis() {
+  const title = document.getElementById('input-title').value.trim() || '無題の会議';
+  const context = document.getElementById('input-context').value.trim();
+  const participants = document.getElementById('input-participants').value.trim();
+  const log = document.getElementById('input-log').value.trim();
+  const al = document.getElementById('analysis-alert');
+
+  if (!log || log.length < 20) {
+    showAlert(al, '会議ログを50文字以上入力してください');
+    return;
+  }
+
+  hideAlert(al);
+  showLoading();
+  startLoadingAnimation();
+
+  try {
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meeting_log: log, context, participants })
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || '分析に失敗しました');
+
+    const record = {
+      id: Date.now(),
+      title, date: new Date().toLocaleString('ja-JP'),
+      context, participants, log,
+      score: json.data.overall_score,
+      data: json.data
+    };
+    appState.history.unshift(record);
+    if (appState.history.length > 50) appState.history.pop();
+
+    await dbSaveMeeting(record);
+
+    if (json.data.detected_persons) {
+      for (const p of json.data.detected_persons) {
+        if (!appState.persons[p.name]) {
+          appState.persons[p.name] = { name: p.name, role: p.role || '', profile: null, meetingIds: [], lastSeen: record.date };
+        }
+        if (!appState.persons[p.name].meetingIds.includes(record.id)) {
+          appState.persons[p.name].meetingIds.push(record.id);
+        }
+        appState.persons[p.name].lastSeen = record.date;
+        appState.persons[p.name].enough_data = p.enough_data;
+        await dbSavePerson(p.name, appState.persons[p.name]);
+      }
+    }
+
+    appState.currentResult = record;
+    hideLoading();
+    renderResults(record);
+    navigate('results');
+
+    document.getElementById('input-title').value = '';
+    document.getElementById('input-context').value = '';
+    document.getElementById('input-participants').value = '';
+    document.getElementById('input-log').value = '';
+
+  } catch(e) {
+    hideLoading();
+    showAlert(al, e.message || '予期しないエラーが発生しました');
+  }
+}
+
+// ===== RENDER RESULTS =====
+function renderResults(record) {
+  const d = record.data;
+  document.getElementById('result-title').textContent = record.title;
+  document.getElementById('result-date').textContent = `📅 ${record.date}`;
+
+  const score = d.overall_score || 0;
+  document.getElementById('result-overall-num').textContent = score;
+  document.getElementById('result-overall-num').className = 'score-ring-num ' + scoreClass(score);
+
+  const circ = document.getElementById('score-circle');
+  const total = 327;
+  setTimeout(() => {
+    circ.style.strokeDashoffset = total - (total * score / 100);
+    circ.style.stroke = scoreColor(score);
+  }, 100);
+
+  const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
+  const subsEl = document.getElementById('result-subscores');
+  subsEl.innerHTML = Object.entries(d.subscores || {}).map(([k, v]) => `
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span>${subNames[k] || k}</span>
+        <span style="font-weight:700;color:${scoreColor(v)}">${v}</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar" style="width:0%;background:${scoreColor(v)}" data-val="${v}"></div>
+      </div>
+    </div>`).join('');
+
+  setTimeout(() => {
+    document.querySelectorAll('.progress-bar').forEach(bar => { bar.style.width = bar.dataset.val + '%'; });
+  }, 100);
+
+  renderResultRadar(d);
+  document.getElementById('result-summary').textContent = d.summary || '';
+
+  const gapsEl = document.getElementById('result-gaps');
+  if (d.gaps && d.gaps.length) {
+    gapsEl.innerHTML = d.gaps.map(g => `
+      <div class="gap-card ${g.severity || 'medium'}">
+        <div class="gap-header">
+          <span class="gap-type">${g.gap_type || 'コミュニケーションのズレ'}</span>
+          <span class="badge badge-${g.severity || 'medium'}">${severityLabel(g.severity)}</span>
+        </div>
+        <div class="gap-section">
+          <div class="gap-section-label">場面・発言</div>
+          <div class="gap-section-text" style="color:var(--muted);font-style:italic">"${g.situation}"</div>
+        </div>
+        <div class="gap-section">
+          <div class="gap-intent">
+            <div class="gap-section-label">🎯 あなたの意図</div>
+            <div class="gap-section-text">${g.speaker_intent}</div>
+          </div>
+        </div>
+        <div class="gap-section">
+          <div class="gap-reception">
+            <div class="gap-section-label">👂 相手の受け取り方（推定）</div>
+            <div class="gap-section-text">${g.likely_reception}</div>
+          </div>
+        </div>
+      </div>`).join('');
+  } else {
+    gapsEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:20px">ズレは検出されませんでした</p>';
+  }
+
+  const strengthsEl = document.getElementById('result-strengths');
+  strengthsEl.innerHTML = (d.strengths || []).length
+    ? d.strengths.map(s => `<div class="strength-item"><span class="strength-icon">✨</span><span>${s}</span></div>`).join('')
+    : '<p style="color:var(--muted)">分析中...</p>';
+
+  const actionsEl = document.getElementById('result-actions');
+  if (d.improvement_actions && d.improvement_actions.length) {
+    actionsEl.innerHTML = d.improvement_actions.map((a, i) => `
+      <div class="action-card">
+        <div class="action-num">${a.priority || i+1}</div>
+        <div style="flex:1">
+          <div class="action-title">${a.title}</div>
+          <div class="action-desc">${a.description}</div>
+          ${a.example_phrase ? `<div class="action-example">${a.example_phrase}</div>` : ''}
+          ${a.impact ? `<div class="action-impact">${a.impact}</div>` : ''}
+        </div>
+      </div>`).join('');
+  } else {
+    actionsEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:20px">改善アクションなし</p>';
+  }
+
+  const checklistEl = document.getElementById('result-checklist');
+  checklistEl.innerHTML = (d.next_meeting_checklist || []).map((item, i) => `
+    <div class="checklist-item">
+      <div class="checklist-check" id="chk-${i}" onclick="toggleCheck(${i})"></div>
+      <span>${item}</span>
+    </div>`).join('') || '<p style="color:var(--muted)">チェックリストなし</p>';
+
+  renderPersonsTab(record);
+  switchTab('gaps', document.querySelector('.tab[data-tab="gaps"]'));
+}
+
+// ===== PERSONS TAB =====
+function renderPersonsTab(record) {
+  const el = document.getElementById('result-persons');
+  const detected = record.data.detected_persons || [];
+  if (!detected.length) {
+    el.innerHTML = '<div class="card"><p style="color:var(--muted);text-align:center;padding:20px">会議ログから参加者を検出できませんでした。<br>ログに「田中：」のように発話者名を明記すると検出されます。</p></div>';
+    return;
+  }
+  el.innerHTML = detected.map(p => {
+    const stored = appState.persons[p.name] || {};
+    const hasProfile = stored.profile;
+    const meetingCount = stored.meetingIds ? stored.meetingIds.length : 1;
+    const canAnalyze = p.enough_data;
+    return `
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+        <div style="display:flex;align-items:center;gap:12px;flex:1">
+          <div style="width:44px;height:44px;border-radius:50%;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">👤</div>
+          <div>
+            <div style="font-weight:700;font-size:15px">${p.name}</div>
+            <div style="font-size:12px;color:var(--muted)">${p.role || '役割不明'} &nbsp;·&nbsp; 登場会議: ${meetingCount}回</div>
+            ${hasProfile ? `<div style="font-size:12px;color:var(--success);margin-top:2px">✅ プロフィール済み</div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+          ${canAnalyze
+            ? `<button class="btn btn-outline btn-sm" onclick="analyzeParticipant('${p.name}','${p.role||''}',${record.id})">${hasProfile ? '🔄 再分析' : '🔍 分析する'}</button>`
+            : `<span style="font-size:12px;color:var(--muted);padding:6px 12px">発言が少なく分析不可</span>`}
+          ${hasProfile ? `<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent)" onclick="viewPersonProfile('${p.name}')">📋 プロフィール確認</button>` : ''}
+        </div>
+      </div>
+      <div id="person-profile-${p.name.replace(/\s/g,'_')}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
+    </div>`;
+  }).join('');
+}
+
+async function analyzeParticipant(name, role, meetingId) {
+  const record = appState.history.find(r => r.id === meetingId);
+  if (!record) return;
+  showLoading();
+  document.getElementById('loading-step').textContent = `${name}を分析中...`;
+  try {
+    const res = await fetch('/api/participant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, role, meeting_log: record.log })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || '分析失敗');
+    if (!appState.persons[name]) appState.persons[name] = { name, role, meetingIds: [meetingId], lastSeen: record.date };
+    appState.persons[name].profile = json.data;
+    appState.persons[name].role = role;
+    await dbSavePerson(name, appState.persons[name]);
+    hideLoading();
+    renderPersonsTab(record);
+    viewPersonProfile(name);
+    switchTab('persons', document.querySelector('.tab[data-tab="persons"]'));
+  } catch(e) {
+    hideLoading();
+    alert('エラー: ' + e.message);
+  }
+}
+
+function viewPersonProfile(name) {
+  const person = appState.persons[name];
+  if (!person || !person.profile) return;
+  const p = person.profile;
+  const elId = `person-profile-${name.replace(/\s/g,'_')}`;
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div class="grid-2" style="gap:12px;margin-bottom:12px">
+      <div style="background:#F8FAFC;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">💬 コミュニケーションスタイル</div>
+        <div style="font-size:13px;line-height:1.6">${p.communication_style || '—'}</div>
+      </div>
+      <div style="background:#F8FAFC;border-radius:8px;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">🎯 効果的なアプローチ</div>
+        <div style="font-size:13px;line-height:1.6">${p.effective_approach || '—'}</div>
+      </div>
+    </div>
+    <div class="grid-2" style="gap:12px;margin-bottom:12px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--success);margin-bottom:6px">✅ 刺さる言葉・フレーズ</div>
+        ${(p.phrases_that_work||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${ph}</div>`).join('')}
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:6px">🚫 避けるべき言葉</div>
+        ${(p.phrases_to_avoid||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${ph}</div>`).join('')}
+      </div>
+    </div>
+    <div style="background:var(--accent-light);border-radius:8px;padding:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">📊 攻略ポイント</div>
+      <div style="font-size:13px;line-height:1.6">${p.summary || '—'}</div>
+    </div>
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn btn-outline btn-sm" onclick="usePrepWithPerson('${name}')">🎯 この人で会議準備する</button>
+    </div>`;
+}
+
+function usePrepWithPerson(name) {
+  navigate('prep');
+  setTimeout(() => togglePrepPerson(name), 100);
+}
+
+// ===== MEETING PREP PAGE =====
+function renderPrepPage() {
+  const el = document.getElementById('prep-person-list');
+  const persons = Object.values(appState.persons).filter(p => p.profile);
+  if (!persons.length) {
+    el.innerHTML = '<p style="color:var(--muted);font-size:13px">まだ参加者プロフィールがありません。<br>会議振り返り → 参加者分析タブから登録できます。</p>';
+    appState.prepSelected = [];
+    renderPrepSelected();
+    return;
+  }
+  el.innerHTML = persons.map(p => {
+    const isSelected = appState.prepSelected.includes(p.name);
+    return `
+    <div class="checklist-item" style="cursor:pointer;padding:10px 8px;border-radius:8px;${isSelected?'background:var(--accent-light);':''}" onclick="togglePrepPerson('${p.name}')">
+      <div class="checklist-check ${isSelected?'checked':''}" id="prep-chk-${p.name.replace(/\s/g,'_')}"></div>
+      <div>
+        <div style="font-weight:600;font-size:14px">${p.name}</div>
+        <div style="font-size:12px;color:var(--muted)">${p.role || '役割不明'} &nbsp;·&nbsp; ${p.meetingIds.length}回分析済み</div>
+      </div>
+    </div>`;
+  }).join('');
+  renderPrepSelected();
+}
+
+function togglePrepPerson(name) {
+  const idx = appState.prepSelected.indexOf(name);
+  if (idx >= 0) appState.prepSelected.splice(idx, 1);
+  else appState.prepSelected.push(name);
+  renderPrepPage();
+}
+
+function addManualPerson() {
+  const name = document.getElementById('manual-name').value.trim();
+  const role = document.getElementById('manual-role').value.trim();
+  const traits = document.getElementById('manual-traits').value.trim();
+  if (!name) { alert('名前を入力してください'); return; }
+  if (appState.prepManual.find(p => p.name === name)) { alert('同じ名前の参加者がすでにいます'); return; }
+  appState.prepManual.push({ name, role, traits });
+  savePrepManual();
+  document.getElementById('manual-name').value = '';
+  document.getElementById('manual-role').value = '';
+  document.getElementById('manual-traits').value = '';
+  renderPrepSelected();
+}
+
+function removeManualPerson(name) {
+  appState.prepManual = appState.prepManual.filter(p => p.name !== name);
+  savePrepManual();
+  renderPrepSelected();
+}
+
+function renderPrepSelected() {
+  const el = document.getElementById('prep-selected-profiles');
+  if (!el) return;
+  const fromAnalysis = appState.prepSelected.map(n => appState.persons[n]).filter(Boolean);
+  const manual = appState.prepManual;
+  const all = [...fromAnalysis, ...manual];
+  if (!all.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = all.map(p => {
+    const isManual = !p.profile && !p.meetingIds;
+    const summary = p.profile?.summary || p.traits || '（情報なし）';
+    return `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="font-weight:700;margin-bottom:6px">
+          👤 ${p.name}
+          <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">${p.role||''}</span>
+          ${isManual ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 6px;border-radius:4px;margin-left:6px">手動入力</span>' : ''}
+        </div>
+        ${isManual ? `<button onclick="removeManualPerson('${p.name}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>` : ''}
+      </div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.6">${summary}</div>
+    </div>`;
+  }).join('');
+}
+
+async function runMeetingPrep() {
+  const goal = document.getElementById('prep-goal').value.trim();
+  const agenda = document.getElementById('prep-agenda').value.trim();
+  const concerns = document.getElementById('prep-concerns').value.trim();
+  const al = document.getElementById('prep-alert');
+  if (!goal) { showAlert(al, '会議の目的を入力してください'); return; }
+  hideAlert(al);
+  showLoading();
+  document.getElementById('loading-step').textContent = 'コミュニケーション戦略を立案中...';
+  const profiles = [
+    ...appState.prepSelected.map(n => {
+      const p = appState.persons[n];
+      return { name: p.name, role: p.role, ...p.profile };
+    }),
+    ...appState.prepManual.map(p => ({
+      name: p.name, role: p.role,
+      communication_style: p.traits || '（特徴なし）',
+      effective_approach: ''
+    }))
+  ];
+  try {
+    const res = await fetch('/api/meeting-prep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, agenda, concerns, profiles })
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || '分析失敗');
+    hideLoading();
+    renderPrepResults(json.data);
+  } catch(e) {
+    hideLoading();
+    showAlert(al, e.message);
+  }
+}
+
+function renderPrepResults(d) {
+  document.getElementById('prep-results').style.display = 'block';
+  document.getElementById('prep-summary').textContent = d.summary || '';
+  document.getElementById('prep-opening').textContent = d.opening_strategy || '—';
+  document.getElementById('prep-closing').textContent = d.closing_strategy || '—';
+  const msgEl = document.getElementById('prep-messages');
+  msgEl.innerHTML = (d.key_messages || []).map((m, i) => `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">${i+1}</div>
+        <div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${m.point}</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">📢 ${m.how_to_present}</div>
+          <div style="font-size:12px;color:var(--warning)">💭 想定反応: ${m.expected_reaction}</div>
+        </div>
+      </div>
+    </div>`).join('');
+  const riskEl = document.getElementById('prep-risks');
+  riskEl.innerHTML = (d.risk_points || []).map(r => `
+    <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <span style="color:var(--warning)">⚠️</span><span>${r}</span>
+    </div>`).join('');
+  const ckEl = document.getElementById('prep-checklist');
+  ckEl.innerHTML = (d.checklist || []).map((item, i) => `
+    <div class="checklist-item">
+      <div class="checklist-check" id="prep-ck-${i}" onclick="toggleCheck2(${i})"></div>
+      <span>${item}</span>
+    </div>`).join('');
+  document.getElementById('prep-results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function toggleCheck2(i) {
+  const el = document.getElementById(`prep-ck-${i}`);
+  if (el) el.classList.toggle('checked');
+}
+
+function renderResultRadar(d) {
+  const ctx = document.getElementById('chart-result-radar');
+  if (!ctx) return;
+  if (appState.charts.resultRadar) appState.charts.resultRadar.destroy();
+  const subNames = ['明確さ','共感力','説得力','傾聴力','建設性','簡潔さ'];
+  const subKeys = ['clarity','empathy','persuasion','listening','constructiveness','conciseness'];
+  const vals = subKeys.map(k => d.subscores?.[k] ?? 70);
+  appState.charts.resultRadar = new Chart(ctx, {
+    type: 'radar',
+    data: { labels: subNames, datasets: [{ label: 'スコア', data: vals, borderColor: '#2563EB', backgroundColor: 'rgba(37,99,235,.15)', pointBackgroundColor: '#2563EB', borderWidth: 2, pointRadius: 4 }] },
+    options: { scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 25, font: { size: 10 } }, pointLabels: { font: { size: 12 } } } }, plugins: { legend: { display: false } } }
+  });
+}
+
+// ===== TABS =====
+function switchTab(name, el) {
+  document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const content = document.getElementById(`tab-${name}`);
+  if (content) content.style.display = 'block';
+  if (el) el.classList.add('active');
+}
+
+// ===== DASHBOARD =====
+function renderDashboard() {
+  const history = appState.history;
+  if (history.length > 0) {
+    const avg = Math.round(history.reduce((s, h) => s + (h.score || 0), 0) / history.length);
+    document.getElementById('dash-total-score').textContent = avg;
+    document.getElementById('dash-total-score').className = 'stat-val ' + scoreClass(avg);
+    if (history.length >= 2) {
+      const diff = history[0].score - history[1].score;
+      const el = document.getElementById('dash-score-change');
+      el.textContent = diff > 0 ? `▲ ${diff} 前回比` : diff < 0 ? `▼ ${Math.abs(diff)} 前回比` : '前回と同じ';
+      el.className = 'stat-change ' + (diff >= 0 ? 'up' : 'down');
+    }
+  } else {
+    document.getElementById('dash-total-score').textContent = '—';
+  }
+  document.getElementById('dash-total-sessions').textContent = history.length;
+  if (history.length > 0) {
+    document.getElementById('dash-streak').textContent = '分析を続けよう！';
+    document.getElementById('dash-streak').className = 'stat-change up';
+  }
+  if (history.length >= 2) {
+    const latest = history[0].data?.subscores || {};
+    const prev = history[1].data?.subscores || {};
+    const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
+    let bestKey = null, bestDiff = -Infinity;
+    Object.keys(latest).forEach(k => { const diff = (latest[k]||0) - (prev[k]||0); if (diff > bestDiff) { bestDiff = diff; bestKey = k; } });
+    if (bestKey) {
+      document.getElementById('dash-best-skill').textContent = subNames[bestKey] || bestKey;
+      document.getElementById('dash-best-skill-sub').textContent = bestDiff >= 0 ? `▲ ${bestDiff}ポイント向上` : `${bestDiff}ポイント`;
+    }
+  } else if (history.length === 1) {
+    const subs = history[0].data?.subscores || {};
+    const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
+    let best = null, bestVal = -1;
+    Object.entries(subs).forEach(([k, v]) => { if (v > bestVal) { bestVal = v; best = k; } });
+    if (best) { document.getElementById('dash-best-skill').textContent = subNames[best] || best; document.getElementById('dash-best-skill-sub').textContent = `スコア ${bestVal}`; }
+  }
+  renderTrendChart();
+  renderDashRadar();
+  renderRecent();
+}
+
+function renderTrendChart() {
+  const history = [...appState.history].reverse();
+  const ctx = document.getElementById('chart-trend');
+  if (appState.charts.trend) appState.charts.trend.destroy();
+  if (history.length < 2) {
+    ctx.style.display = 'none';
+    document.getElementById('trend-empty').style.display = 'block';
+    return;
+  }
+  ctx.style.display = 'block';
+  document.getElementById('trend-empty').style.display = 'none';
+  appState.charts.trend = new Chart(ctx, {
+    type: 'line',
+    data: { labels: history.map((_, i) => `#${i+1}`), datasets: [{ label: '総合スコア', data: history.map(h => h.score), borderColor: '#2563EB', backgroundColor: 'rgba(37,99,235,.1)', fill: true, tension: .4, pointRadius: 5, pointBackgroundColor: '#2563EB' }] },
+    options: { scales: { y: { beginAtZero: false, min: 0, max: 100, ticks: { font: { size: 11 } } }, x: { ticks: { font: { size: 11 } } } }, plugins: { legend: { display: false } } }
+  });
+}
+
+function renderDashRadar() {
+  const ctx = document.getElementById('chart-radar');
+  if (appState.charts.dashRadar) appState.charts.dashRadar.destroy();
+  if (!appState.history.length) {
+    ctx.style.display = 'none';
+    document.getElementById('radar-empty').style.display = 'block';
+    return;
+  }
+  ctx.style.display = 'block';
+  document.getElementById('radar-empty').style.display = 'none';
+  const latest = appState.history[0].data?.subscores || {};
+  const subNames = ['明確さ','共感力','説得力','傾聴力','建設性','簡潔さ'];
+  const subKeys = ['clarity','empathy','persuasion','listening','constructiveness','conciseness'];
+  appState.charts.dashRadar = new Chart(ctx, {
+    type: 'radar',
+    data: { labels: subNames, datasets: [{ data: subKeys.map(k => latest[k] ?? 70), borderColor: '#2563EB', backgroundColor: 'rgba(37,99,235,.15)', borderWidth: 2, pointRadius: 4, pointBackgroundColor: '#2563EB' }] },
+    options: { scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 25, font: { size: 10 } }, pointLabels: { font: { size: 11 } } } }, plugins: { legend: { display: false } } }
+  });
+}
+
+function renderRecent() {
+  const el = document.getElementById('dash-recent');
+  const recent = appState.history.slice(0, 5);
+  if (!recent.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📝</div><p>まだ分析がありません。<br>最初の会議ログを分析してみましょう！</p><br><button class="btn btn-primary" style="width:auto" onclick="navigate('analysis')">＋ 最初の分析を始める</button></div>`;
+    return;
+  }
+  el.innerHTML = recent.map(r => `
+    <div class="history-item" onclick="viewRecord(${r.id})">
+      <div class="history-score ${scoreColorClass(r.score)}" style="color:#fff">${r.score}</div>
+      <div class="history-info">
+        <div class="history-title">${r.title}</div>
+        <div class="history-meta">📅 ${r.date}</div>
+      </div>
+      <div class="history-arrow">›</div>
+    </div>`).join('');
+}
+
+// ===== HISTORY PAGE =====
+function renderHistory() {
+  const el = document.getElementById('history-list');
+  if (!appState.history.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📋</div><p>まだ分析履歴がありません</p><br><button class="btn btn-primary" style="width:auto" onclick="navigate('analysis')">＋ 分析を始める</button></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="history-list">${appState.history.map(r => `
+    <div class="history-item" onclick="viewRecord(${r.id})">
+      <div class="history-score ${scoreColorClass(r.score)}" style="color:#fff">${r.score}</div>
+      <div class="history-info">
+        <div class="history-title">${r.title}</div>
+        <div class="history-meta">📅 ${r.date} ${r.participants ? `&nbsp;&bull;&nbsp; 👥 ${r.participants}` : ''}</div>
+      </div>
+      <div class="history-arrow">›</div>
+    </div>`).join('')}</div>`;
+}
+
+function viewRecord(id) {
+  const record = appState.history.find(r => r.id === id);
+  if (!record) return;
+  appState.currentResult = record;
+  renderResults(record);
+  navigate('results');
+}
+
+// ===== SETTINGS =====
+async function saveSettings() {
+  const name = document.getElementById('settings-name').value.trim();
+  const al = document.getElementById('settings-alert');
+  if (!name) { showAlert(al, 'お名前を入力してください'); return; }
+  try {
+    await supabase.auth.updateUser({ data: { name } });
+    appState.userName = name;
+    document.getElementById('sidebar-user').textContent = name;
+    al.textContent = '✅ 保存しました';
+    al.className = 'alert alert-success show';
+    setTimeout(() => { al.className = 'alert'; }, 3000);
+  } catch(e) {
+    showAlert(al, '保存に失敗しました: ' + e.message);
+  }
+}
+
+async function clearAllData() {
+  if (!confirm('すべての分析履歴・参加者プロフィールを削除しますか？\nこの操作は取り消せません。')) return;
+  try {
+    showLoading();
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from('meetings').delete().eq('user_id', user.id);
+    await supabase.from('persons').delete().eq('user_id', user.id);
+    await supabase.from('myprofile_cache').delete().eq('user_id', user.id);
+    localStorage.removeItem('deepdive_prepManual');
+    appState.history = [];
+    appState.persons = {};
+    appState.myprofileCache = null;
+    appState.prepManual = [];
+    appState.prepSelected = [];
+    hideLoading();
+    navigate('dashboard');
+    alert('✅ データを削除しました');
+  } catch(e) {
+    hideLoading();
+    alert('削除に失敗しました: ' + e.message);
+  }
+}
+
+// ===== MY PROFILE =====
+function initMyProfile() {
+  document.getElementById('myprofile-regen-btn').style.display = 'none';
+  if (appState.history.length < 2) { showMyProfileState('empty'); return; }
+  if (appState.myprofileCache) {
+    renderMyProfile(appState.myprofileCache);
+    document.getElementById('myprofile-regen-btn').style.display = 'inline-flex';
+    return;
+  }
+  generateMyProfile(false);
+}
+
+async function generateMyProfile(force = false) {
+  if (appState.history.length < 2) { showMyProfileState('empty'); return; }
+  showMyProfileState('loading');
+  let stepIdx = 0;
+  const stepTimer = setInterval(() => {
+    if (stepIdx > 0) {
+      const prev = document.getElementById(`lstep-${stepIdx-1}`);
+      if (prev) { prev.classList.remove('active'); prev.classList.add('done'); prev.querySelector('.lstep-check').style.display=''; }
+    }
+    const cur = document.getElementById(`lstep-${stepIdx}`);
+    if (cur) cur.classList.add('active');
+    stepIdx++;
+    if (stepIdx >= 4) clearInterval(stepTimer);
+  }, 1200);
+
+  try {
+    const res = await fetch('/api/myprofile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        history: appState.history.map(h => ({
+          score: h.score,
+          data: { subscores: h.data?.subscores, gaps: h.data?.gaps, strengths: h.data?.strengths, improvement_actions: h.data?.improvement_actions }
+        }))
+      })
+    });
+    clearInterval(stepTimer);
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.error || '分析失敗');
+    const cacheData = { ...json.data, generatedAt: new Date().toLocaleString('ja-JP'), sessionCount: appState.history.length };
+    appState.myprofileCache = cacheData;
+    await dbSaveMyProfile(cacheData);
+    renderMyProfile(cacheData);
+    document.getElementById('myprofile-regen-btn').style.display = 'inline-flex';
+  } catch(e) {
+    clearInterval(stepTimer);
+    showMyProfileState('empty');
+    alert('エラーが発生しました: ' + e.message);
+  }
+}
+
+function showMyProfileState(state) {
+  ['empty','loading','result'].forEach(s => {
+    document.getElementById(`myprofile-${s}`).style.display = s === state ? 'block' : 'none';
+  });
+}
+
+function renderMyProfile(d) {
+  showMyProfileState('result');
+  document.getElementById('myprofile-type-icon').textContent = d.type_icon || '💬';
+  document.getElementById('myprofile-type-name').textContent = d.personality_type || '—';
+  document.getElementById('myprofile-type-desc').textContent = d.type_description || '';
+  document.getElementById('myprofile-mantra').textContent = d.communication_mantra || '';
+  const strEl = document.getElementById('myprofile-strengths');
+  strEl.innerHTML = (d.core_strengths || []).map(s => `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="font-weight:700;font-size:14px;color:var(--success);margin-bottom:4px">✨ ${s.strength}</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:4px">${s.description}</div>
+      <div style="font-size:12px;color:var(--muted)">根拠: ${s.evidence}</div>
+    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
+  const bsEl = document.getElementById('myprofile-blindspots');
+  bsEl.innerHTML = (d.blind_spots || []).map(b => `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="font-weight:700;font-size:14px;color:var(--warning);margin-bottom:4px">⚠️ ${b.pattern}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">📍 よく起きる状況: ${b.trigger}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">💥 影響: ${b.impact}</div>
+      <div style="background:var(--accent-light);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--accent)">💡 ${b.hint}</div>
+    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
+  const grEl = document.getElementById('myprofile-growth');
+  grEl.innerHTML = (d.growth_areas || []).map(g => `
+    <div style="margin-bottom:18px">
+      <div class="progress-label">
+        <span style="font-weight:600">${g.area}</span>
+        <span style="font-weight:700;color:${scoreColor(g.current_score||0)}">${g.current_score||0}</span>
+      </div>
+      <div class="progress-bar-bg" style="margin-bottom:8px">
+        <div class="progress-bar" style="width:${g.current_score||0}%;background:${scoreColor(g.current_score||0)}"></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">🎯 ${g.tip}</div>
+    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
+  document.getElementById('myprofile-assessment').textContent = d.overall_assessment || '';
+  document.getElementById('myprofile-nextfocus').textContent = d.next_focus || '';
+  const atEl = document.getElementById('myprofile-generated-at');
+  atEl.textContent = d.generatedAt ? `最終生成: ${d.generatedAt}（${d.sessionCount || 0}回分の分析をもとに作成）` : '';
+}
+
+// ===== HELPERS =====
+function scoreClass(s) { return s >= 70 ? 'color-good' : s >= 50 ? 'color-ok' : 'color-poor'; }
+function scoreColor(s) { return s >= 70 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626'; }
+function scoreColorClass(s) { return s >= 70 ? 'bg-good' : s >= 50 ? 'bg-ok' : 'bg-poor'; }
+function severityLabel(s) { return s === 'high' ? '重要' : s === 'medium' ? '中程度' : '軽微'; }
+
+function showAlert(el, msg) { el.textContent = '⚠️ ' + msg; el.className = 'alert alert-error show'; }
+function hideAlert(el) { el.className = 'alert'; }
+function toggleCheck(i) { document.getElementById(`chk-${i}`)?.classList.toggle('checked'); }
+
+// ===== LOADING =====
+const loadingSteps = ['会議ログを読み込み中...','コミュニケーションパターンを解析中...','意図と受け取りのズレを検出中...','改善アクションを生成中...','スコアを算出中...'];
+let loadingInterval = null;
+function showLoading() { document.getElementById('loading').classList.add('show'); }
+function hideLoading() { document.getElementById('loading').classList.remove('show'); if (loadingInterval) clearInterval(loadingInterval); }
+function startLoadingAnimation() {
+  let i = 0;
+  const el = document.getElementById('loading-step');
+  el.textContent = loadingSteps[0];
+  loadingInterval = setInterval(() => { i = (i + 1) % loadingSteps.length; el.textContent = loadingSteps[i]; }, 1800);
+}
+</script>
+</body>
+</html>
