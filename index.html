@@ -1001,29 +1001,21 @@ let appState = {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await initSupabase();
+    // 初期セッション確認
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      await loadUserData(session.user);
+      showApp();
+    } else {
+      showAuth();
+    }
+    // 以降の認証変化を監視（SIGNED_IN/SIGNED_OUTのみ）
     supabaseClient.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'INITIAL_SESSION') {
-        try {
-          if (session) {
-            await loadUserData(session.user);
-            showApp();
-          } else {
-            showAuth();
-          }
-        } catch(e) {
-          console.error('Init load error:', e);
-          showAuth();
-        } finally {
-          document.getElementById('app-loading').style.display = 'none';
-        }
-      } else if (event === 'SIGNED_IN') {
+      if (event === 'SIGNED_IN') {
         try {
           await loadUserData(session.user);
           showApp();
-        } catch(e) {
-          console.error('Sign in load error:', e);
-          showAuth();
-        }
+        } catch(e) { console.error('Sign in load error:', e); }
       } else if (event === 'SIGNED_OUT') {
         clearState();
         showAuth();
