@@ -396,14 +396,17 @@
     <div class="nav-item" data-page="analysis">
       <span class="nav-icon">🔄</span> 会議振り返り
     </div>
+    <div class="nav-item" data-page="history">
+      <span class="nav-icon">📋</span> 分析履歴
+    </div>
     <div class="nav-item" data-page="prep">
       <span class="nav-icon">🎯</span> 会議準備
     </div>
+    <div class="nav-item" data-page="prep-history">
+      <span class="nav-icon">📁</span> 準備履歴
+    </div>
     <div class="nav-item" data-page="myprofile">
       <span class="nav-icon">🪞</span> マイプロフィール
-    </div>
-    <div class="nav-item" data-page="history">
-      <span class="nav-icon">📋</span> 分析履歴
     </div>
     <div class="nav-item" data-page="settings">
       <span class="nav-icon">⚙️</span> 設定
@@ -558,6 +561,11 @@
           <label>参加者</label>
           <input type="text" id="input-participants"
             placeholder="例：自分（部長）、田中さん（マネージャー）" />
+        </div>
+        <div class="form-group">
+          <label>ログ上の自分の呼称 <span style="color:var(--muted);font-weight:400;font-size:12px">（スコアをあなた自身の評価にするために使用）</span></label>
+          <input type="text" id="input-my-name"
+            placeholder="例：私、山田、Yoshimi" />
         </div>
       </div>
 
@@ -930,6 +938,15 @@
     <div id="history-list"></div>
   </div>
 
+  <!-- PREP HISTORY PAGE -->
+  <div id="page-prep-history" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">📁 準備履歴</h2>
+      <p class="page-subtitle">過去の会議準備を振り返りましょう</p>
+    </div>
+    <div id="prep-history-list"></div>
+  </div>
+
   <!-- SETTINGS PAGE -->
   <div id="page-settings" class="page" style="display:none">
     <div class="page-header">
@@ -1203,6 +1220,7 @@ function navigate(page) {
   if (page === 'dashboard') renderDashboard();
   if (page === 'history') renderHistory();
   if (page === 'prep') renderPrepPage();
+  if (page === 'prep-history') renderPrepHistory();
   if (page === 'myprofile') initMyProfile();
   if (page === 'settings') {
     document.getElementById('settings-name').value = appState.userName;
@@ -1215,6 +1233,7 @@ async function runAnalysis() {
   const title = document.getElementById('input-title').value.trim() || '無題の会議';
   const context = document.getElementById('input-context').value.trim();
   const participants = document.getElementById('input-participants').value.trim();
+  const myName = document.getElementById('input-my-name').value.trim();
   const log = document.getElementById('input-log').value.trim();
   const al = document.getElementById('analysis-alert');
 
@@ -1231,7 +1250,7 @@ async function runAnalysis() {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ meeting_log: log, context, participants })
+      body: JSON.stringify({ meeting_log: log, context, participants, my_name: myName })
     });
 
     const json = await res.json();
@@ -1271,6 +1290,7 @@ async function runAnalysis() {
     document.getElementById('input-title').value = '';
     document.getElementById('input-context').value = '';
     document.getElementById('input-participants').value = '';
+    document.getElementById('input-my-name').value = '';
     document.getElementById('input-log').value = '';
 
   } catch(e) {
@@ -1285,35 +1305,73 @@ function renderResults(record) {
   document.getElementById('result-title').textContent = record.title;
   document.getElementById('result-date').textContent = `📅 ${record.date}`;
 
-  const score = d.overall_score || 0;
-  document.getElementById('result-overall-num').textContent = score;
-  document.getElementById('result-overall-num').className = 'score-ring-num ' + scoreClass(score);
+  // ログが短すぎる場合（200文字未満 or 4行未満）はスコア・レーダーを分析不可にする
+  const logText = record.log || '';
+  const logLines = logText.split('\n').filter(l => l.trim()).length;
+  const insufficient = logText.trim().length < 200 || logLines < 4;
 
-  const circ = document.getElementById('score-circle');
-  const total = 327;
-  setTimeout(() => {
-    circ.style.strokeDashoffset = total - (total * score / 100);
-    circ.style.stroke = scoreColor(score);
-  }, 100);
+  const insufficientMsg = `<div style="text-align:center;padding:24px 16px;color:var(--muted)">
+    <div style="font-size:28px;margin-bottom:8px">📊</div>
+    <div style="font-weight:700;font-size:14px;margin-bottom:4px">発言が少なく分析不可</div>
+    <div style="font-size:12px">より正確な評価のため<br>もう少し長いログを入力してください</div>
+  </div>`;
 
-  const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
-  const subsEl = document.getElementById('result-subscores');
-  subsEl.innerHTML = Object.entries(d.subscores || {}).map(([k, v]) => `
-    <div class="progress-wrap">
-      <div class="progress-label">
-        <span>${subNames[k] || k}</span>
-        <span style="font-weight:700;color:${scoreColor(v)}">${v}</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar" style="width:0%;background:${scoreColor(v)}" data-val="${v}"></div>
-      </div>
-    </div>`).join('');
+  if (insufficient) {
+    document.getElementById('result-overall-num').textContent = '—';
+    document.getElementById('result-overall-num').className = 'score-ring-num';
+    const circ = document.getElementById('score-circle');
+    circ.style.strokeDashoffset = 327;
+    circ.style.stroke = '#E2E8F0';
+    document.getElementById('result-subscores').innerHTML = insufficientMsg;
+    const radarCanvas = document.getElementById('chart-result-radar');
+    if (radarCanvas) {
+      radarCanvas.style.display = 'none';
+      const radarWrap = radarCanvas.parentElement;
+      if (!radarWrap.querySelector('.radar-insufficient')) {
+        const div = document.createElement('div');
+        div.className = 'radar-insufficient';
+        div.innerHTML = insufficientMsg;
+        radarWrap.appendChild(div);
+      }
+    }
+  } else {
+    const score = d.overall_score || 0;
+    document.getElementById('result-overall-num').textContent = score;
+    document.getElementById('result-overall-num').className = 'score-ring-num ' + scoreClass(score);
 
-  setTimeout(() => {
-    document.querySelectorAll('.progress-bar').forEach(bar => { bar.style.width = bar.dataset.val + '%'; });
-  }, 100);
+    const circ = document.getElementById('score-circle');
+    const total = 327;
+    setTimeout(() => {
+      circ.style.strokeDashoffset = total - (total * score / 100);
+      circ.style.stroke = scoreColor(score);
+    }, 100);
 
-  renderResultRadar(d);
+    const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
+    const subsEl = document.getElementById('result-subscores');
+    subsEl.innerHTML = Object.entries(d.subscores || {}).map(([k, v]) => `
+      <div class="progress-wrap">
+        <div class="progress-label">
+          <span>${subNames[k] || k}</span>
+          <span style="font-weight:700;color:${scoreColor(v)}">${v}</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar" style="width:0%;background:${scoreColor(v)}" data-val="${v}"></div>
+        </div>
+      </div>`).join('');
+
+    setTimeout(() => {
+      document.querySelectorAll('.progress-bar').forEach(bar => { bar.style.width = bar.dataset.val + '%'; });
+    }, 100);
+
+    // レーダーチャートをリセット（前回の分析不可表示を消す）
+    const radarCanvas = document.getElementById('chart-result-radar');
+    if (radarCanvas) {
+      radarCanvas.style.display = '';
+      const prev = radarCanvas.parentElement.querySelector('.radar-insufficient');
+      if (prev) prev.remove();
+    }
+    renderResultRadar(d);
+  }
   document.getElementById('result-summary').textContent = d.summary || '';
 
   const gapsEl = document.getElementById('result-gaps');
@@ -1591,6 +1649,18 @@ async function runMeetingPrep() {
     });
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.error || '分析失敗');
+    // 履歴に保存
+    const prepRecord = {
+      id: Date.now(),
+      date: new Date().toLocaleString('ja-JP'),
+      goal, agenda, concerns,
+      participants: profiles.map(p => p.name).join('、'),
+      result: json.data
+    };
+    const prepHistory = JSON.parse(localStorage.getItem('deepdive_prepHistory') || '[]');
+    prepHistory.unshift(prepRecord);
+    if (prepHistory.length > 20) prepHistory.pop();
+    localStorage.setItem('deepdive_prepHistory', JSON.stringify(prepHistory));
     hideLoading();
     renderPrepResults(json.data);
   } catch(e) {
@@ -1781,6 +1851,39 @@ function viewRecord(id) {
   appState.currentResult = record;
   renderResults(record);
   navigate('results');
+}
+
+// ===== PREP HISTORY PAGE =====
+function renderPrepHistory() {
+  const el = document.getElementById('prep-history-list');
+  const history = JSON.parse(localStorage.getItem('deepdive_prepHistory') || '[]');
+  if (!history.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📁</div><p>まだ準備履歴がありません</p><br><button class="btn btn-primary" style="width:auto" onclick="navigate('prep')">＋ 会議準備を始める</button></div>`;
+    return;
+  }
+  el.innerHTML = history.map(r => `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div>
+          <div style="font-weight:700;font-size:15px;margin-bottom:4px">🎯 ${r.goal}</div>
+          <div style="font-size:12px;color:var(--muted)">📅 ${r.date}${r.participants ? `　👥 ${r.participants}` : ''}</div>
+        </div>
+      </div>
+      ${r.agenda ? `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">📝 ${r.agenda}</div>` : ''}
+      ${r.result?.summary ? `
+        <div style="background:var(--accent-light);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;margin-bottom:12px">
+          ${r.result.summary}
+        </div>` : ''}
+      <details style="cursor:pointer">
+        <summary style="font-size:13px;font-weight:600;color:var(--accent);list-style:none;user-select:none">▶ 詳細を見る</summary>
+        <div style="margin-top:12px">
+          ${r.result?.opening_strategy ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🚪 会議の入り方</div><div style="font-size:13px">${r.result.opening_strategy}</div></div>` : ''}
+          ${(r.result?.key_messages||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">💬 キーメッセージ</div>${r.result.key_messages.map((m,i)=>`<div style="font-size:13px;padding:6px 10px;background:var(--surface);border-radius:6px;margin-bottom:4px"><strong>${i+1}. ${m.point}</strong><br><span style="color:var(--muted)">${m.how_to_present}</span></div>`).join('')}</div>` : ''}
+          ${(r.result?.risk_points||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">⚠️ リスク・懸念点</div>${r.result.risk_points.map(p=>`<div style="font-size:13px;color:var(--warning);padding:4px 0">• ${p}</div>`).join('')}</div>` : ''}
+          ${r.result?.closing_strategy ? `<div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🏁 締め方</div><div style="font-size:13px">${r.result.closing_strategy}</div></div>` : ''}
+        </div>
+      </details>
+    </div>`).join('');
 }
 
 // ===== SETTINGS =====
