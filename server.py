@@ -1,9 +1,19 @@
 #!/usr/bin/env python3
 """
-Deep Dive - AIコミュニケーション分析サーバー
+Deep Dive - AIコミュニケーション分析サーバー（ローカル開発専用）
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!! 警告: このファイルはローカル開発・テスト専用です。                          !!
+!! 本番環境では Vercel のサーバーレス関数（/api/*.js）を使用してください。    !!
+!! このサーバーを公開ネットワークや本番環境で起動しないでください。           !!
+!! CORS は localhost:8765 のみ許可しています。                                !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 起動方法: python3 server.py
 アクセス: http://localhost:8765
 """
+
+ALLOWED_ORIGIN = 'http://localhost:8765'
 
 import json
 import urllib.request
@@ -99,13 +109,13 @@ class DeepDiveHandler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
         self.end_headers()
         self.wfile.write(body)
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
@@ -188,6 +198,9 @@ class DeepDiveHandler(BaseHTTPRequestHandler):
             raise ValueError(f'AIの返答をJSON解析できませんでした: {e}\n\n返答の先頭200字: {text[:200]}')
 
     def _call_claude(self, data):
+        # NOTE: ローカル開発専用。api_key はクライアントから受け取る設計だが、
+        # このサーバーは localhost のみで起動することを前提としています。
+        # 本番環境では /api/*.js（サーバーサイド環境変数）を使用してください。
         api_key = data.get('api_key', '').strip()
         meeting_log = data.get('meeting_log', '').strip()
         context = data.get('context', '特に指定なし').strip() or '特に指定なし'

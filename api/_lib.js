@@ -180,6 +180,17 @@ function verifyJWT(token, secret) {
   if (payload.exp && payload.exp < now) throw new Error('トークンの有効期限が切れています');
   if (payload.nbf && payload.nbf > now) throw new Error('トークンがまだ有効ではありません');
 
+  // Validate audience (aud): Supabase tokens must target 'authenticated'
+  if (payload.aud && payload.aud !== 'authenticated') {
+    throw new Error(`トークンのaud（対象者）が無効です: ${payload.aud}`);
+  }
+
+  // Validate issuer (iss): must match Supabase project URL
+  const supabaseUrl = process.env.SUPABASE_URL;
+  if (supabaseUrl && payload.iss && payload.iss !== `${supabaseUrl}/auth/v1`) {
+    throw new Error(`トークンのiss（発行者）が無効です: ${payload.iss}`);
+  }
+
   return payload;
 }
 
@@ -215,4 +226,70 @@ async function verifyAuth(req) {
   }
 }
 
-module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors, verifyAuth, AuthError };
+// ============================================================
+// Rate Limiting (in-memory, fixed window)
+//
+// ⚠️ サーバーレス環境での制約:
+//   Vercel は各 Function インスタンスを独立したプロセスで実行するため、
+//   このストアはインスタンス間で共有されません。
+//   ウォームインスタンスが複数起動している場合、制限は「インスタンスごと」に
+//   適用されます（グローバルなユーザー単位ではありません）。
+//   将来 Redis / Upstash に移行する場合は checkRateLimit() だけ差し替えてください。
+// ============================================================
+
+/** @type {Map<string, { count: number, resetAt: number }>} */
+const _rateLimitStore = new Map();
+
+// Periodically purge expired entries to prevent unbounded Map growth.
+// Runs lazily: triggered every 500 inserts.
+let _rlInsertCount = 0;
+function _maybePurgeExpired() {
+  if (++_rlInsertCount < 500) return;
+  _rlInsertCount = 0;
+  const now = Date.now();
+  for (const [key, entry] of _rateLimitStore) {
+    if (now >= entry.resetAt) _rateLimitStore.delete(key);
+  }
+}
+
+class RateLimitError extends Error {
+  constructor(message, retryAfter) {
+    super(message);
+    this.isRateLimitError = true;
+    this.retryAfter = retryAfter; // seconds
+  }
+}
+
+/**
+ * Fixed-window rate limiter.
+ * Throws RateLimitError when the limit is exceeded.
+ *
+ * @param {string} userId   - user.sub from verified JWT
+ * @param {string} endpoint - short name, e.g. 'analyze'
+ * @param {number} limit    - max requests allowed within the window
+ * @param {number} windowMs - window length in milliseconds
+ */
+function checkRateLimit(userId, endpoint, limit, windowMs) {
+  const key = `${userId}:${endpoint}`;
+  const now = Date.now();
+  const entry = _rateLimitStore.get(key);
+
+  if (!entry || now >= entry.resetAt) {
+    // Start a new window
+    _rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    _maybePurgeExpired();
+    return;
+  }
+
+  if (entry.count >= limit) {
+    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    throw new RateLimitError(
+      `リクエストが多すぎます。${retryAfter}秒後に再試行してください。`,
+      retryAfter
+    );
+  }
+
+  entry.count += 1;
+}
+
+module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors, verifyAuth, AuthError, checkRateLimit, RateLimitError };

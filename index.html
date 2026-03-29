@@ -1065,7 +1065,7 @@ async function loadUserData(user) {
   appState.userName = user.user_metadata?.name || user.email.split('@')[0];
   appState.userEmail = user.email;
   appState.userId = user.id;
-  appState.prepManual = JSON.parse(localStorage.getItem('deepdive_prepManual') || '[]');
+  appState.prepManual = JSON.parse(localStorage.getItem(`deepdive_prepManual_${user.id}`) || '[]');
   // 前回セッションの自分の呼称を復元（参加者フィルタに使用）
   const savedMyName = localStorage.getItem(`deepdive_myName_${user.id}`);
   if (savedMyName) appState.myName = savedMyName;
@@ -1078,6 +1078,13 @@ async function loadUserData(user) {
     appState.history = [];
     appState.persons = {};
     appState.myprofileCache = null;
+  }
+
+  // 準備履歴の localStorage → Supabase 移行クリーンアップ。
+  // 旧キーが残っていれば削除する（データは Supabase に移行済み）。
+  const legacyPrepKey = `deepdive_prepHistory_${user.id}`;
+  if (localStorage.getItem(legacyPrepKey) !== null) {
+    localStorage.removeItem(legacyPrepKey);
   }
 }
 
@@ -1094,7 +1101,7 @@ function clearState() {
 }
 
 function savePrepManual() {
-  localStorage.setItem('deepdive_prepManual', JSON.stringify(appState.prepManual));
+  localStorage.setItem(`deepdive_prepManual_${appState.userId}`, JSON.stringify(appState.prepManual));
 }
 
 // ===== SUPABASE AUTH =====
@@ -1129,7 +1136,16 @@ async function signUp() {
 }
 
 async function signOut() {
+  // signOut() を先に完了させてから storage をクリアする。
+  // Supabase は signOut 完了後に SIGNED_OUT イベントを発火し、
+  // onAuthStateChange が clearState() → showAuth() を呼ぶため
+  // ここでは UI 操作は不要。
   await supabaseClient.auth.signOut();
+
+  // 共有端末でのデータ残留を防ぐため、全 storage をクリアする。
+  // deepdive_* キーに加え、Supabase が書き込む "sb-" キーも含めて完全消去する。
+  localStorage.clear();
+  sessionStorage.clear();
 }
 
 function toggleAuthMode(e) {
@@ -1199,6 +1215,38 @@ async function dbSaveMyProfile(profileData) {
     user_id: appState.userId, data: profileData, updated_at: new Date().toISOString()
   });
   if (error) console.error('dbSaveMyProfile error:', error);
+}
+
+// ===== MEETING PREP HISTORY (Supabase) =====
+// content カラム（jsonb）に prepRecord オブジェクト全体を格納する。
+// prepRecord 構造: { id, date, goal, agenda, concerns, participants, result }
+
+async function dbSavePrepHistory(prepRecord) {
+  const { error } = await supabaseClient.from('meeting_preparations').insert({
+    user_id: appState.userId,
+    meeting_id: null,          // 会議未紐付けの準備履歴は NULL
+    content: prepRecord
+  });
+  if (error) console.error('dbSavePrepHistory error:', error);
+}
+
+async function dbLoadPrepHistory() {
+  const { data, error } = await supabaseClient
+    .from('meeting_preparations')
+    .select('id, content, created_at')
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  // content フィールドがそのまま prepRecord として使える
+  return (data || []).map(r => r.content);
+}
+
+async function dbDeletePrepHistory() {
+  const { error } = await supabaseClient
+    .from('meeting_preparations')
+    .delete()
+    .eq('user_id', appState.userId);
+  if (error) console.error('dbDeletePrepHistory error:', error);
 }
 
 // ===== NAVIGATION =====
@@ -1350,7 +1398,7 @@ function renderResults(record) {
       }
     }
   } else {
-    const score = d.overall_score || 0;
+    const score = Math.min(100, Math.max(0, Number(d.overall_score) || 0));
     document.getElementById('result-overall-num').textContent = score;
     document.getElementById('result-overall-num').className = 'score-ring-num ' + scoreClass(score);
 
@@ -1363,19 +1411,22 @@ function renderResults(record) {
 
     const subNames = { clarity: '明確さ', empathy: '共感力', persuasion: '説得力', listening: '傾聴力', constructiveness: '建設性', conciseness: '簡潔さ' };
     const subsEl = document.getElementById('result-subscores');
-    subsEl.innerHTML = Object.entries(d.subscores || {}).map(([k, v]) => `
+    subsEl.innerHTML = Object.entries(d.subscores || {}).map(([k, v]) => {
+      const score = Math.min(100, Math.max(0, Number(v) || 0));
+      return `
       <div class="progress-wrap">
         <div class="progress-label">
-          <span>${subNames[k] || k}</span>
-          <span style="font-weight:700;color:${scoreColor(v)}">${v}</span>
+          <span>${subNames[k] || escapeHtml(k)}</span>
+          <span style="font-weight:700;color:${scoreColor(score)}">${score}</span>
         </div>
         <div class="progress-bar-bg">
-          <div class="progress-bar" style="width:0%;background:${scoreColor(v)}" data-val="${v}"></div>
+          <div class="progress-bar" style="width:0%;background:${scoreColor(score)}" data-val="${score}"></div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
     setTimeout(() => {
-      document.querySelectorAll('.progress-bar').forEach(bar => { bar.style.width = bar.dataset.val + '%'; });
+      document.querySelectorAll('.progress-bar').forEach(bar => { bar.style.width = (parseFloat(bar.dataset.val) || 0) + '%'; });
     }, 100);
 
     // レーダーチャートをリセット（前回の分析不可表示を消す）
@@ -1391,48 +1442,51 @@ function renderResults(record) {
 
   const gapsEl = document.getElementById('result-gaps');
   if (d.gaps && d.gaps.length) {
-    gapsEl.innerHTML = d.gaps.map(g => `
-      <div class="gap-card ${g.severity || 'medium'}">
+    gapsEl.innerHTML = d.gaps.map(g => {
+      const sev = ['high','medium','low'].includes(g.severity) ? g.severity : 'medium';
+      return `
+      <div class="gap-card ${sev}">
         <div class="gap-header">
-          <span class="gap-type">${g.gap_type || 'コミュニケーションのズレ'}</span>
-          <span class="badge badge-${g.severity || 'medium'}">${severityLabel(g.severity)}</span>
+          <span class="gap-type">${escapeHtml(g.gap_type) || 'コミュニケーションのズレ'}</span>
+          <span class="badge badge-${sev}">${severityLabel(sev)}</span>
         </div>
         <div class="gap-section">
           <div class="gap-section-label">場面・発言</div>
-          <div class="gap-section-text" style="color:var(--muted);font-style:italic">"${g.situation}"</div>
+          <div class="gap-section-text" style="color:var(--muted);font-style:italic">"${escapeHtml(g.situation)}"</div>
         </div>
         <div class="gap-section">
           <div class="gap-intent">
             <div class="gap-section-label">🎯 あなたの意図</div>
-            <div class="gap-section-text">${g.speaker_intent}</div>
+            <div class="gap-section-text">${escapeHtml(g.speaker_intent)}</div>
           </div>
         </div>
         <div class="gap-section">
           <div class="gap-reception">
             <div class="gap-section-label">👂 相手の受け取り方（推定）</div>
-            <div class="gap-section-text">${g.likely_reception}</div>
+            <div class="gap-section-text">${escapeHtml(g.likely_reception)}</div>
           </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   } else {
     gapsEl.innerHTML = '<p style="text-align:center;color:var(--muted);padding:20px">ズレは検出されませんでした</p>';
   }
 
   const strengthsEl = document.getElementById('result-strengths');
   strengthsEl.innerHTML = (d.strengths || []).length
-    ? d.strengths.map(s => `<div class="strength-item"><span class="strength-icon">✨</span><span>${s}</span></div>`).join('')
+    ? d.strengths.map(s => `<div class="strength-item"><span class="strength-icon">✨</span><span>${escapeHtml(s)}</span></div>`).join('')
     : '<p style="color:var(--muted)">分析中...</p>';
 
   const actionsEl = document.getElementById('result-actions');
   if (d.improvement_actions && d.improvement_actions.length) {
     actionsEl.innerHTML = d.improvement_actions.map((a, i) => `
       <div class="action-card">
-        <div class="action-num">${a.priority || i+1}</div>
+        <div class="action-num">${Number.isFinite(a.priority) ? a.priority : i+1}</div>
         <div style="flex:1">
-          <div class="action-title">${a.title}</div>
-          <div class="action-desc">${a.description}</div>
-          ${a.example_phrase ? `<div class="action-example">${a.example_phrase}</div>` : ''}
-          ${a.impact ? `<div class="action-impact">${a.impact}</div>` : ''}
+          <div class="action-title">${escapeHtml(a.title)}</div>
+          <div class="action-desc">${escapeHtml(a.description)}</div>
+          ${a.example_phrase ? `<div class="action-example">${escapeHtml(a.example_phrase)}</div>` : ''}
+          ${a.impact ? `<div class="action-impact">${escapeHtml(a.impact)}</div>` : ''}
         </div>
       </div>`).join('');
   } else {
@@ -1443,7 +1497,7 @@ function renderResults(record) {
   checklistEl.innerHTML = (d.next_meeting_checklist || []).map((item, i) => `
     <div class="checklist-item">
       <div class="checklist-check" id="chk-${i}" onclick="toggleCheck(${i})"></div>
-      <span>${item}</span>
+      <span>${escapeHtml(item)}</span>
     </div>`).join('') || '<p style="color:var(--muted)">チェックリストなし</p>';
 
   renderPersonsTab(record);
@@ -1466,27 +1520,34 @@ function renderPersonsTab(record) {
     const canAnalyze = p.enough_data;
     const commType = stored.profile?.communication_type || null;
     const commIcon = stored.profile?.type_icon || '';
+    const safeId = p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     return `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
         <div style="display:flex;align-items:center;gap:12px;flex:1">
           <div style="width:44px;height:44px;border-radius:50%;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">👤</div>
           <div>
-            <div style="font-weight:700;font-size:15px">${p.name}</div>
-            <div style="font-size:12px;color:var(--muted)">${p.role || '役割不明'} &nbsp;·&nbsp; 登場会議: ${meetingCount}回</div>
-            ${commType ? `<div style="margin-top:4px"><span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-light);color:var(--accent);padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600">${commIcon} ${commType}</span></div>` : (hasProfile ? `<div style="font-size:12px;color:var(--success);margin-top:2px">✅ プロフィール済み</div>` : '')}
+            <div style="font-weight:700;font-size:15px">${escapeHtml(p.name)}</div>
+            <div style="font-size:12px;color:var(--muted)">${escapeHtml(p.role || '役割不明')} &nbsp;·&nbsp; 登場会議: ${meetingCount}回</div>
+            ${commType ? `<div style="margin-top:4px"><span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-light);color:var(--accent);padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600">${escapeHtml(commIcon)} ${escapeHtml(commType)}</span></div>` : (hasProfile ? `<div style="font-size:12px;color:var(--success);margin-top:2px">✅ プロフィール済み</div>` : '')}
           </div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
           ${canAnalyze
-            ? `<button class="btn btn-outline btn-sm" onclick="analyzeParticipant('${p.name}','${p.role||''}',${record.id})">${hasProfile ? '🔄 再分析' : '🔍 分析する'}</button>`
+            ? `<button class="btn btn-outline btn-sm" data-action="analyze" data-name="${escapeHtml(p.name)}" data-role="${escapeHtml(p.role||'')}" data-id="${record.id}">${hasProfile ? '🔄 再分析' : '🔍 分析する'}</button>`
             : `<span style="font-size:12px;color:var(--muted);padding:6px 12px">発言が少なく分析不可</span>`}
-          ${hasProfile ? `<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent)" onclick="viewPersonProfile('${p.name}')">📋 詳細確認</button>` : ''}
+          ${hasProfile ? `<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent)" data-action="viewprofile" data-name="${escapeHtml(p.name)}">📋 詳細確認</button>` : ''}
         </div>
       </div>
-      <div id="person-profile-${p.name.replace(/\s/g,'_')}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
+      <div id="person-profile-${safeId}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
     </div>`;
   }).join('');
+  el.querySelectorAll('[data-action="analyze"]').forEach(btn => {
+    btn.addEventListener('click', () => analyzeParticipant(btn.dataset.name, btn.dataset.role, Number(btn.dataset.id)));
+  });
+  el.querySelectorAll('[data-action="viewprofile"]').forEach(btn => {
+    btn.addEventListener('click', () => viewPersonProfile(btn.dataset.name));
+  });
 }
 
 async function analyzeParticipant(name, role, meetingId) {
@@ -1520,7 +1581,8 @@ function viewPersonProfile(name) {
   const person = appState.persons[name];
   if (!person || !person.profile) return;
   const p = person.profile;
-  const elId = `person-profile-${name.replace(/\s/g,'_')}`;
+  const safeId = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const elId = `person-profile-${safeId}`;
   const el = document.getElementById(elId);
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
@@ -1528,39 +1590,41 @@ function viewPersonProfile(name) {
   el.innerHTML = `
     ${p.communication_type ? `
     <div style="display:flex;align-items:center;gap:10px;background:var(--accent-light);border-radius:10px;padding:12px 16px;margin-bottom:12px">
-      <span style="font-size:28px">${p.type_icon || ''}</span>
+      <span style="font-size:28px">${escapeHtml(p.type_icon || '')}</span>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:2px">コミュニケーションタイプ</div>
-        <div style="font-size:16px;font-weight:700">${p.communication_type}</div>
+        <div style="font-size:16px;font-weight:700">${escapeHtml(p.communication_type)}</div>
       </div>
     </div>` : ''}
     <div class="grid-2" style="gap:12px;margin-bottom:12px">
       <div style="background:#F8FAFC;border-radius:8px;padding:12px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">💬 コミュニケーションスタイル</div>
-        <div style="font-size:13px;line-height:1.6">${p.communication_style || '—'}</div>
+        <div style="font-size:13px;line-height:1.6">${escapeHtml(p.communication_style || '—')}</div>
       </div>
       <div style="background:#F8FAFC;border-radius:8px;padding:12px">
         <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">🎯 効果的なアプローチ</div>
-        <div style="font-size:13px;line-height:1.6">${p.effective_approach || '—'}</div>
+        <div style="font-size:13px;line-height:1.6">${escapeHtml(p.effective_approach || '—')}</div>
       </div>
     </div>
     <div class="grid-2" style="gap:12px;margin-bottom:12px">
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--success);margin-bottom:6px">✅ 刺さる言葉・フレーズ</div>
-        ${(p.phrases_that_work||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${ph}</div>`).join('')}
+        ${(p.phrases_that_work||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('')}
       </div>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:6px">🚫 避けるべき言葉</div>
-        ${(p.phrases_to_avoid||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${ph}</div>`).join('')}
+        ${(p.phrases_to_avoid||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('')}
       </div>
     </div>
     <div style="background:var(--accent-light);border-radius:8px;padding:12px">
       <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">📊 攻略ポイント</div>
-      <div style="font-size:13px;line-height:1.6">${p.summary || '—'}</div>
+      <div style="font-size:13px;line-height:1.6">${escapeHtml(p.summary || '—')}</div>
     </div>
     <div style="margin-top:12px;text-align:right">
-      <button class="btn btn-outline btn-sm" onclick="usePrepWithPerson('${name}')">🎯 この人で会議準備する</button>
+      <button class="btn btn-outline btn-sm" data-action="prep-with-person" data-name="${escapeHtml(name)}">🎯 この人で会議準備する</button>
     </div>`;
+  const prepBtn = el.querySelector('[data-action="prep-with-person"]');
+  if (prepBtn) prepBtn.addEventListener('click', () => usePrepWithPerson(prepBtn.dataset.name));
 }
 
 function usePrepWithPerson(name) {
@@ -1581,15 +1645,19 @@ function renderPrepPage() {
   }
   el.innerHTML = persons.map(p => {
     const isSelected = appState.prepSelected.includes(p.name);
+    const safeId = p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     return `
-    <div class="checklist-item" style="cursor:pointer;padding:10px 8px;border-radius:8px;${isSelected?'background:var(--accent-light);':''}" onclick="togglePrepPerson('${p.name}')">
-      <div class="checklist-check ${isSelected?'checked':''}" id="prep-chk-${p.name.replace(/\s/g,'_')}"></div>
+    <div class="checklist-item" style="cursor:pointer;padding:10px 8px;border-radius:8px;${isSelected?'background:var(--accent-light);':''}" data-action="toggle-prep-person" data-name="${escapeHtml(p.name)}">
+      <div class="checklist-check ${isSelected?'checked':''}" id="prep-chk-${safeId}"></div>
       <div>
-        <div style="font-weight:600;font-size:14px">${p.name}</div>
-        <div style="font-size:12px;color:var(--muted)">${p.role || '役割不明'} &nbsp;·&nbsp; ${p.meetingIds.length}回分析済み</div>
+        <div style="font-weight:600;font-size:14px">${escapeHtml(p.name)}</div>
+        <div style="font-size:12px;color:var(--muted)">${escapeHtml(p.role || '役割不明')} &nbsp;·&nbsp; ${p.meetingIds.length}回分析済み</div>
       </div>
     </div>`;
   }).join('');
+  el.querySelectorAll('[data-action="toggle-prep-person"]').forEach(div => {
+    div.addEventListener('click', () => togglePrepPerson(div.dataset.name));
+  });
   renderPrepSelected();
 }
 
@@ -1637,15 +1705,18 @@ function renderPrepSelected() {
     <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div style="font-weight:700;margin-bottom:6px">
-          👤 ${p.name}
-          <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">${p.role||''}</span>
+          👤 ${escapeHtml(p.name)}
+          <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">${escapeHtml(p.role||'')}</span>
           ${isManual ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 6px;border-radius:4px;margin-left:6px">手動入力</span>' : ''}
         </div>
-        ${isManual ? `<button onclick="removeManualPerson('${p.name}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>` : ''}
+        ${isManual ? `<button data-action="remove-manual" data-name="${escapeHtml(p.name)}" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>` : ''}
       </div>
-      <div style="font-size:13px;color:var(--muted);line-height:1.6">${summary}</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.6">${escapeHtml(summary)}</div>
     </div>`;
   }).join('');
+  el.querySelectorAll('[data-action="remove-manual"]').forEach(btn => {
+    btn.addEventListener('click', () => removeManualPerson(btn.dataset.name));
+  });
 }
 
 async function runMeetingPrep() {
@@ -1676,7 +1747,7 @@ async function runMeetingPrep() {
     });
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.error || '分析失敗');
-    // 履歴に保存
+    // 履歴に保存（Supabase の meeting_preparations テーブルへ）
     const prepRecord = {
       id: Date.now(),
       date: new Date().toLocaleString('ja-JP'),
@@ -1684,11 +1755,7 @@ async function runMeetingPrep() {
       participants: profiles.map(p => p.name).join('、'),
       result: json.data
     };
-    const prepKey = `deepdive_prepHistory_${appState.userId || 'anon'}`;
-    const prepHistory = JSON.parse(localStorage.getItem(prepKey) || '[]');
-    prepHistory.unshift(prepRecord);
-    if (prepHistory.length > 20) prepHistory.pop();
-    localStorage.setItem(prepKey, JSON.stringify(prepHistory));
+    await dbSavePrepHistory(prepRecord);
     hideLoading();
     renderPrepResults(json.data);
   } catch(e) {
@@ -1708,22 +1775,22 @@ function renderPrepResults(d) {
       <div style="display:flex;gap:12px;align-items:flex-start">
         <div style="width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">${i+1}</div>
         <div>
-          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${m.point}</div>
-          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">📢 ${m.how_to_present}</div>
-          <div style="font-size:12px;color:var(--warning)">💭 想定反応: ${m.expected_reaction}</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${escapeHtml(m.point)}</div>
+          <div style="font-size:13px;color:var(--muted);margin-bottom:6px">📢 ${escapeHtml(m.how_to_present)}</div>
+          <div style="font-size:12px;color:var(--warning)">💭 想定反応: ${escapeHtml(m.expected_reaction)}</div>
         </div>
       </div>
     </div>`).join('');
   const riskEl = document.getElementById('prep-risks');
   riskEl.innerHTML = (d.risk_points || []).map(r => `
     <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
-      <span style="color:var(--warning)">⚠️</span><span>${r}</span>
+      <span style="color:var(--warning)">⚠️</span><span>${escapeHtml(r)}</span>
     </div>`).join('');
   const ckEl = document.getElementById('prep-checklist');
   ckEl.innerHTML = (d.checklist || []).map((item, i) => `
     <div class="checklist-item">
       <div class="checklist-check" id="prep-ck-${i}" onclick="toggleCheck2(${i})"></div>
-      <span>${item}</span>
+      <span>${escapeHtml(item)}</span>
     </div>`).join('');
   document.getElementById('prep-results').scrollIntoView({ behavior: 'smooth' });
 }
@@ -1848,8 +1915,8 @@ function renderRecent() {
     <div class="history-item" onclick="viewRecord(${r.id})">
       <div class="history-score ${scoreColorClass(r.score)}" style="color:#fff">${r.score}</div>
       <div class="history-info">
-        <div class="history-title">${r.title}</div>
-        <div class="history-meta">📅 ${r.date}</div>
+        <div class="history-title">${escapeHtml(r.title)}</div>
+        <div class="history-meta">📅 ${escapeHtml(r.date)}</div>
       </div>
       <div class="history-arrow">›</div>
     </div>`).join('');
@@ -1866,8 +1933,8 @@ function renderHistory() {
     <div class="history-item" onclick="viewRecord(${r.id})">
       <div class="history-score ${scoreColorClass(r.score)}" style="color:#fff">${r.score}</div>
       <div class="history-info">
-        <div class="history-title">${r.title}</div>
-        <div class="history-meta">📅 ${r.date} ${r.participants ? `&nbsp;&bull;&nbsp; 👥 ${r.participants}` : ''}</div>
+        <div class="history-title">${escapeHtml(r.title)}</div>
+        <div class="history-meta">📅 ${escapeHtml(r.date)} ${r.participants ? `&nbsp;&bull;&nbsp; 👥 ${escapeHtml(r.participants)}` : ''}</div>
       </div>
       <div class="history-arrow">›</div>
     </div>`).join('')}</div>`;
@@ -1882,10 +1949,17 @@ function viewRecord(id) {
 }
 
 // ===== PREP HISTORY PAGE =====
-function renderPrepHistory() {
+async function renderPrepHistory() {
   const el = document.getElementById('prep-history-list');
-  const prepKey = `deepdive_prepHistory_${appState.userId || 'anon'}`;
-  const history = JSON.parse(localStorage.getItem(prepKey) || '[]');
+  el.innerHTML = '<p style="color:var(--muted);text-align:center;padding:24px">読み込み中...</p>';
+  let history = [];
+  try {
+    history = await dbLoadPrepHistory(); // Supabase から取得
+  } catch(e) {
+    console.error('準備履歴の取得に失敗:', e);
+    el.innerHTML = '<p style="color:var(--danger);text-align:center;padding:24px">履歴の読み込みに失敗しました</p>';
+    return;
+  }
   if (!history.length) {
     el.innerHTML = `<div class="empty-state"><div class="icon">📁</div><p>まだ準備履歴がありません</p><br><button class="btn btn-primary" style="width:auto" onclick="navigate('prep')">＋ 会議準備を始める</button></div>`;
     return;
@@ -1894,22 +1968,22 @@ function renderPrepHistory() {
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
         <div>
-          <div style="font-weight:700;font-size:15px;margin-bottom:4px">🎯 ${r.goal}</div>
-          <div style="font-size:12px;color:var(--muted)">📅 ${r.date}${r.participants ? `　👥 ${r.participants}` : ''}</div>
+          <div style="font-weight:700;font-size:15px;margin-bottom:4px">🎯 ${escapeHtml(r.goal)}</div>
+          <div style="font-size:12px;color:var(--muted)">📅 ${escapeHtml(r.date)}${r.participants ? `　👥 ${escapeHtml(r.participants)}` : ''}</div>
         </div>
       </div>
-      ${r.agenda ? `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">📝 ${r.agenda}</div>` : ''}
+      ${r.agenda ? `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">📝 ${escapeHtml(r.agenda)}</div>` : ''}
       ${r.result?.summary ? `
         <div style="background:var(--accent-light);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 8px 8px 0;font-size:13px;margin-bottom:12px">
-          ${r.result.summary}
+          ${escapeHtml(r.result.summary)}
         </div>` : ''}
       <details style="cursor:pointer">
         <summary style="font-size:13px;font-weight:600;color:var(--accent);list-style:none;user-select:none">▶ 詳細を見る</summary>
         <div style="margin-top:12px">
-          ${r.result?.opening_strategy ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🚪 会議の入り方</div><div style="font-size:13px">${r.result.opening_strategy}</div></div>` : ''}
-          ${(r.result?.key_messages||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">💬 キーメッセージ</div>${r.result.key_messages.map((m,i)=>`<div style="font-size:13px;padding:6px 10px;background:var(--surface);border-radius:6px;margin-bottom:4px"><strong>${i+1}. ${m.point}</strong><br><span style="color:var(--muted)">${m.how_to_present}</span></div>`).join('')}</div>` : ''}
-          ${(r.result?.risk_points||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">⚠️ リスク・懸念点</div>${r.result.risk_points.map(p=>`<div style="font-size:13px;color:var(--warning);padding:4px 0">• ${p}</div>`).join('')}</div>` : ''}
-          ${r.result?.closing_strategy ? `<div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🏁 締め方</div><div style="font-size:13px">${r.result.closing_strategy}</div></div>` : ''}
+          ${r.result?.opening_strategy ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🚪 会議の入り方</div><div style="font-size:13px">${escapeHtml(r.result.opening_strategy)}</div></div>` : ''}
+          ${(r.result?.key_messages||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">💬 キーメッセージ</div>${r.result.key_messages.map((m,i)=>`<div style="font-size:13px;padding:6px 10px;background:var(--surface);border-radius:6px;margin-bottom:4px"><strong>${i+1}. ${escapeHtml(m.point)}</strong><br><span style="color:var(--muted)">${escapeHtml(m.how_to_present)}</span></div>`).join('')}</div>` : ''}
+          ${(r.result?.risk_points||[]).length ? `<div style="margin-bottom:10px"><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">⚠️ リスク・懸念点</div>${r.result.risk_points.map(rp=>`<div style="font-size:13px;color:var(--warning);padding:4px 0">• ${escapeHtml(rp)}</div>`).join('')}</div>` : ''}
+          ${r.result?.closing_strategy ? `<div><div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">🏁 締め方</div><div style="font-size:13px">${escapeHtml(r.result.closing_strategy)}</div></div>` : ''}
         </div>
       </details>
     </div>`).join('');
@@ -1939,7 +2013,12 @@ async function clearAllData() {
     await supabaseClient.from('meetings').delete().eq('user_id', appState.userId);
     await supabaseClient.from('persons').delete().eq('user_id', appState.userId);
     await supabaseClient.from('myprofile_cache').delete().eq('user_id', appState.userId);
-    localStorage.removeItem('deepdive_prepManual');
+    await dbDeletePrepHistory(); // meeting_preparations テーブルから削除
+    localStorage.removeItem(`deepdive_prepManual_${appState.userId}`);
+    // deepdive_prepHistory は Supabase 移行済みのため localStorage には残らないが
+    // 移行前データが残っている場合に備えてクリーンアップする
+    localStorage.removeItem(`deepdive_prepHistory_${appState.userId}`);
+    localStorage.removeItem(`deepdive_myName_${appState.userId}`);
     appState.history = [];
     appState.persons = {};
     appState.myprofileCache = null;
@@ -2022,30 +2101,33 @@ function renderMyProfile(d) {
   const strEl = document.getElementById('myprofile-strengths');
   strEl.innerHTML = (d.core_strengths || []).map(s => `
     <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
-      <div style="font-weight:700;font-size:14px;color:var(--success);margin-bottom:4px">✨ ${s.strength}</div>
-      <div style="font-size:13px;color:var(--text);margin-bottom:4px">${s.description}</div>
-      <div style="font-size:12px;color:var(--muted)">根拠: ${s.evidence}</div>
+      <div style="font-weight:700;font-size:14px;color:var(--success);margin-bottom:4px">✨ ${escapeHtml(s.strength)}</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:4px">${escapeHtml(s.description)}</div>
+      <div style="font-size:12px;color:var(--muted)">根拠: ${escapeHtml(s.evidence)}</div>
     </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
   const bsEl = document.getElementById('myprofile-blindspots');
   bsEl.innerHTML = (d.blind_spots || []).map(b => `
     <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
-      <div style="font-weight:700;font-size:14px;color:var(--warning);margin-bottom:4px">⚠️ ${b.pattern}</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">📍 よく起きる状況: ${b.trigger}</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">💥 影響: ${b.impact}</div>
-      <div style="background:var(--accent-light);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--accent)">💡 ${b.hint}</div>
+      <div style="font-weight:700;font-size:14px;color:var(--warning);margin-bottom:4px">⚠️ ${escapeHtml(b.pattern)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:4px">📍 よく起きる状況: ${escapeHtml(b.trigger)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">💥 影響: ${escapeHtml(b.impact)}</div>
+      <div style="background:var(--accent-light);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--accent)">💡 ${escapeHtml(b.hint)}</div>
     </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
   const grEl = document.getElementById('myprofile-growth');
-  grEl.innerHTML = (d.growth_areas || []).map(g => `
+  grEl.innerHTML = (d.growth_areas || []).map(g => {
+    const cs = Math.min(100, Math.max(0, Number(g.current_score) || 0));
+    return `
     <div style="margin-bottom:18px">
       <div class="progress-label">
-        <span style="font-weight:600">${g.area}</span>
-        <span style="font-weight:700;color:${scoreColor(g.current_score||0)}">${g.current_score||0}</span>
+        <span style="font-weight:600">${escapeHtml(g.area)}</span>
+        <span style="font-weight:700;color:${scoreColor(cs)}">${cs}</span>
       </div>
       <div class="progress-bar-bg" style="margin-bottom:8px">
-        <div class="progress-bar" style="width:${g.current_score||0}%;background:${scoreColor(g.current_score||0)}"></div>
+        <div class="progress-bar" style="width:${cs}%;background:${scoreColor(cs)}"></div>
       </div>
-      <div style="font-size:12px;color:var(--muted)">🎯 ${g.tip}</div>
-    </div>`).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
+      <div style="font-size:12px;color:var(--muted)">🎯 ${escapeHtml(g.tip)}</div>
+    </div>`;
+  }).join('') || '<p style="color:var(--muted);font-size:13px">データ不足</p>';
   document.getElementById('myprofile-assessment').textContent = d.overall_assessment || '';
   document.getElementById('myprofile-nextfocus').textContent = d.next_focus || '';
   const atEl = document.getElementById('myprofile-generated-at');
@@ -2053,6 +2135,10 @@ function renderMyProfile(d) {
 }
 
 // ===== HELPERS =====
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 function scoreClass(s) { return s >= 70 ? 'color-good' : s >= 50 ? 'color-ok' : 'color-poor'; }
 function scoreColor(s) { return s >= 70 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626'; }
 function scoreColorClass(s) { return s >= 70 ? 'bg-good' : s >= 50 ? 'bg-ok' : 'bg-poor'; }

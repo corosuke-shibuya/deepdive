@@ -1,4 +1,4 @@
-const { PARTICIPANT_PROMPT, fmt, callAnthropic, cors, verifyAuth, AuthError } = require('./_lib');
+const { PARTICIPANT_PROMPT, fmt, callAnthropic, cors, verifyAuth, AuthError, checkRateLimit, RateLimitError } = require('./_lib');
 
 module.exports = async function(req, res) {
   cors(res);
@@ -8,6 +8,8 @@ module.exports = async function(req, res) {
   try {
     // Verify user is authenticated
     const user = await verifyAuth(req);
+    // Rate limit: 10 requests per minute per user
+    checkRateLimit(user.sub, 'participant', 10, 60 * 1000);
 
     const { name, role, meeting_log } = req.body || {};
 
@@ -29,6 +31,10 @@ module.exports = async function(req, res) {
     return res.json({ success: true, data });
 
   } catch(e) {
+    if (e instanceof RateLimitError) {
+      res.setHeader('Retry-After', String(e.retryAfter));
+      return res.status(429).json({ error: e.message });
+    }
     if (e instanceof AuthError) return res.status(401).json({ error: e.message });
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
