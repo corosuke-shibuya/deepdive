@@ -1,4 +1,4 @@
-const { MEETING_PREP_PROMPT, fmt, callAnthropic, cors } = require('./_lib');
+const { MEETING_PREP_PROMPT, fmt, callAnthropic, cors, verifyAuth } = require('./_lib');
 
 module.exports = async function(req, res) {
   cors(res);
@@ -6,6 +6,9 @@ module.exports = async function(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    // Verify user is authenticated
+    const user = await verifyAuth(req);
+
     const { goal, agenda, concerns, profiles } = req.body || {};
 
     if (!goal) return res.status(400).json({ error: '会議の目的を入力してください' });

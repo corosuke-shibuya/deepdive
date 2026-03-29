@@ -1,4 +1,4 @@
-const { ANALYSIS_PROMPT, fmt, callAnthropic, cors } = require('./_lib');
+const { ANALYSIS_PROMPT, fmt, callAnthropic, cors, verifyAuth } = require('./_lib');
 
 module.exports = async function(req, res) {
   cors(res);
@@ -6,6 +6,9 @@ module.exports = async function(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   try {
+    // Verify user is authenticated
+    const user = await verifyAuth(req);
+
     const { meeting_log, context, participants, my_name } = req.body || {};
 
     if (!meeting_log || meeting_log.trim().length < 20) {

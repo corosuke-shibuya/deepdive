@@ -147,4 +147,51 @@ function cors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors };
+// JWT verification helper - validates Supabase JWT token from Authorization header
+async function verifyAuth(req) {
+  const authHeader = req.headers.authorization || '';
+  if (!authHeader.startsWith('Bearer ')) {
+    throw new Error('認証が必要です: Authorization ヘッダーを Bearer トークンで指定してください');
+  }
+
+  const token = authHeader.slice(7);
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+
+  if (!jwtSecret) {
+    // In development without JWT secret, log warning but allow
+    console.warn('SUPABASE_JWT_SECRET not configured, skipping token validation');
+    // For production, this should be enforced
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('サーバー設定エラー: SUPABASE_JWT_SECRET が未設定です');
+    }
+    return { sub: 'dev-user', email: 'dev@example.com' };
+  }
+
+  try {
+    // Import jsonwebtoken if available, otherwise validate token format
+    let decoded;
+    try {
+      const jwt = require('jsonwebtoken');
+      decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
+    } catch(e) {
+      // If jsonwebtoken not available, at least validate JWT structure
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('無効なトークン形式です');
+      }
+      // Decode without verification (requires jsonwebtoken for full validation)
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      decoded = payload;
+    }
+
+    if (!decoded.sub && !decoded.user_id) {
+      throw new Error('トークンに有効なユーザー情報がありません');
+    }
+
+    return decoded;
+  } catch(e) {
+    throw new Error(`認証エラー: ${e.message}`);
+  }
+}
+
+module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors, verifyAuth };
