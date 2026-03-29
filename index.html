@@ -1065,9 +1065,11 @@ async function loadUserData(user) {
   appState.userName = user.user_metadata?.name || user.email.split('@')[0];
   appState.userEmail = user.email;
   appState.userId = user.id;
-  appState.prepManual = JSON.parse(localStorage.getItem(`deepdive_prepManual_${user.id}`) || '[]');
-  // 前回セッションの自分の呼称を復元（参加者フィルタに使用）
-  const savedMyName = localStorage.getItem(`deepdive_myName_${user.id}`);
+  // prepManual はセッション内一時メモ（会議準備のたびに手入力する想定）。
+  // localStorage には保存しない——機微な会話相手情報を端末に残さないための意図的な設計。
+  // 前回セッションの自分の呼称を復元（参加者フィルタに使用）。
+  // localStorage ではなく Supabase user_metadata から読む。端末にデータを残さない。
+  const savedMyName = user.user_metadata?.my_name || '';
   if (savedMyName) appState.myName = savedMyName;
   try {
     appState.history = await dbLoadHistory();
@@ -1101,7 +1103,8 @@ function clearState() {
 }
 
 function savePrepManual() {
-  localStorage.setItem(`deepdive_prepManual_${appState.userId}`, JSON.stringify(appState.prepManual));
+  // prepManual はセッション内メモリのみ管理。localStorage には保存しない。
+  // 会話相手の特徴メモを端末に残さないための意図的な設計。
 }
 
 // ===== SUPABASE AUTH =====
@@ -1142,10 +1145,16 @@ async function signOut() {
   // ここでは UI 操作は不要。
   await supabaseClient.auth.signOut();
 
-  // 共有端末でのデータ残留を防ぐため、全 storage をクリアする。
-  // deepdive_* キーに加え、Supabase が書き込む "sb-" キーも含めて完全消去する。
-  localStorage.clear();
-  sessionStorage.clear();
+  // 共有端末でのデータ残留を防ぐため、このアプリ関連キーのみ削除する。
+  // localStorage.clear() は同一オリジン上の他データを巻き込む恐れがあるため使わない。
+  // 削除対象: deepdive_* （アプリデータ）+ sb-* （Supabase セッション）
+  const clearTargetedStorage = (storage) => {
+    Object.keys(storage)
+      .filter(k => k.startsWith('deepdive_') || k.startsWith('sb-'))
+      .forEach(k => storage.removeItem(k));
+  };
+  clearTargetedStorage(localStorage);
+  clearTargetedStorage(sessionStorage);
 }
 
 function toggleAuthMode(e) {
@@ -1311,10 +1320,12 @@ async function runAnalysis() {
     const json = await res.json();
     if (!res.ok || !json.success) throw new Error(json.error || '分析に失敗しました');
 
-    // 自分の呼称を記憶（会議準備・参加者一覧での除外に使用）
+    // 自分の呼称を記憶（会議準備・参加者一覧での除外に使用）。
+    // localStorage ではなく Supabase user_metadata に保存。端末にデータを残さない。
     if (myName) {
       appState.myName = myName;
-      localStorage.setItem(`deepdive_myName_${appState.userId}`, myName);
+      supabaseClient.auth.updateUser({ data: { my_name: myName } })
+        .catch(e => console.error('myName save error:', e));
     }
 
     const record = {
@@ -2014,11 +2025,12 @@ async function clearAllData() {
     await supabaseClient.from('persons').delete().eq('user_id', appState.userId);
     await supabaseClient.from('myprofile_cache').delete().eq('user_id', appState.userId);
     await dbDeletePrepHistory(); // meeting_preparations テーブルから削除
-    localStorage.removeItem(`deepdive_prepManual_${appState.userId}`);
-    // deepdive_prepHistory は Supabase 移行済みのため localStorage には残らないが
-    // 移行前データが残っている場合に備えてクリーンアップする
+    // prepManual は localStorage に保存しない設計のため removeItem 不要。
+    // prepHistory は Supabase 移行済み。移行前データが残っている場合のクリーンアップとして残す。
     localStorage.removeItem(`deepdive_prepHistory_${appState.userId}`);
-    localStorage.removeItem(`deepdive_myName_${appState.userId}`);
+    // myName は user_metadata（Supabase側）管理のため localStorage removeItem 不要。
+    await supabaseClient.auth.updateUser({ data: { my_name: null } })
+      .catch(e => console.error('myName clear error:', e));
     appState.history = [];
     appState.persons = {};
     appState.myprofileCache = null;

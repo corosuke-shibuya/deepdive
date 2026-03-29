@@ -68,5 +68,35 @@ create policy "myprofile_cache: own data only"
 -- インデックス（パフォーマンス向上）
 -- ============================================================
 
+-- 4. 会議準備履歴
+create table if not exists meeting_preparations (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users(id) on delete cascade not null,
+  meeting_id bigint references meetings(id) on delete cascade,  -- 会議未紐付けは NULL 許容
+  content jsonb not null,                                        -- prepRecord オブジェクト全体
+  created_at timestamptz default now(),
+  expires_at timestamptz                                         -- 将来の有効期限管理用（現在は未使用）
+);
+
+alter table meeting_preparations enable row level security;
+
+create policy "meeting_preparations: select own data only"
+  on meeting_preparations for select
+  using (auth.uid() = user_id);
+
+create policy "meeting_preparations: insert own data only"
+  on meeting_preparations for insert
+  with check (auth.uid() = user_id);
+
+create policy "meeting_preparations: delete own data only"
+  on meeting_preparations for delete
+  using (auth.uid() = user_id);
+
+-- ============================================================
+-- インデックス（パフォーマンス向上）
+-- ============================================================
+
 create index if not exists meetings_user_id_idx on meetings(user_id, created_at desc);
 create index if not exists persons_user_id_idx on persons(user_id);
+create index if not exists meeting_preparations_user_id_idx
+  on meeting_preparations(user_id, created_at desc);
