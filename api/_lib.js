@@ -140,58 +140,79 @@ async function callAnthropic(prompt) {
   return extractJson(text);
 }
 
-// CORS headers helper
+// CORS headers helper - restrict to own Vercel domain
 function cors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || 'https://deepdive-azure.vercel.app';
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Vary', 'Origin');
+}
+
+// JWT verification using Node.js built-in crypto (no external dependencies)
+// Verifies HS256 signature, expiration, and payload structure
+function verifyJWT(token, secret) {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('無効なトークン形式です');
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+
+  // Verify HMAC-SHA256 signature using native crypto
+  const crypto = require('crypto');
+  const signingInput = `${headerB64}.${payloadB64}`;
+  const expectedSig = crypto
+    .createHmac('sha256', secret)
+    .update(signingInput)
+    .digest('base64url');
+
+  // Constant-time comparison to prevent timing attacks
+  const sigBuf = Buffer.from(signatureB64);
+  const expBuf = Buffer.from(expectedSig);
+  const signaturesMatch = sigBuf.length === expBuf.length &&
+    crypto.timingSafeEqual(sigBuf, expBuf);
+  if (!signaturesMatch) throw new Error('トークンの署名が無効です');
+
+  // Decode and validate payload
+  const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+
+  // Check expiration
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < now) throw new Error('トークンの有効期限が切れています');
+  if (payload.nbf && payload.nbf > now) throw new Error('トークンがまだ有効ではありません');
+
+  return payload;
+}
+
+// Auth error class to distinguish auth failures from server errors
+class AuthError extends Error {
+  constructor(message) {
+    super(message);
+    this.isAuthError = true;
+  }
 }
 
 // JWT verification helper - validates Supabase JWT token from Authorization header
 async function verifyAuth(req) {
   const authHeader = req.headers.authorization || '';
   if (!authHeader.startsWith('Bearer ')) {
-    throw new Error('認証が必要です: Authorization ヘッダーを Bearer トークンで指定してください');
+    throw new AuthError('認証が必要です');
   }
 
   const token = authHeader.slice(7);
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+  if (!token) throw new AuthError('トークンが空です');
 
-  if (!jwtSecret) {
-    // In development without JWT secret, log warning but allow
-    console.warn('SUPABASE_JWT_SECRET not configured, skipping token validation');
-    // For production, this should be enforced
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('サーバー設定エラー: SUPABASE_JWT_SECRET が未設定です');
-    }
-    return { sub: 'dev-user', email: 'dev@example.com' };
-  }
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+  if (!jwtSecret) throw new Error('サーバー設定エラー: SUPABASE_JWT_SECRET が未設定です');
 
   try {
-    // Import jsonwebtoken if available, otherwise validate token format
-    let decoded;
-    try {
-      const jwt = require('jsonwebtoken');
-      decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] });
-    } catch(e) {
-      // If jsonwebtoken not available, at least validate JWT structure
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        throw new Error('無効なトークン形式です');
-      }
-      // Decode without verification (requires jsonwebtoken for full validation)
-      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-      decoded = payload;
-    }
-
-    if (!decoded.sub && !decoded.user_id) {
-      throw new Error('トークンに有効なユーザー情報がありません');
-    }
-
-    return decoded;
+    const payload = verifyJWT(token, jwtSecret);
+    if (!payload.sub) throw new AuthError('トークンにユーザーIDがありません');
+    return payload;
   } catch(e) {
-    throw new Error(`認証エラー: ${e.message}`);
+    // Re-throw AuthError as-is; wrap others
+    if (e.isAuthError) throw e;
+    throw new AuthError(`認証エラー: ${e.message}`);
   }
 }
 
-module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors, verifyAuth };
+module.exports = { ANALYSIS_PROMPT, PARTICIPANT_PROMPT, MEETING_PREP_PROMPT, MYPROFILE_PROMPT, fmt, extractJson, callAnthropic, cors, verifyAuth, AuthError };

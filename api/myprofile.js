@@ -1,4 +1,4 @@
-const { MYPROFILE_PROMPT, fmt, callAnthropic, cors, verifyAuth } = require('./_lib');
+const { MYPROFILE_PROMPT, fmt, callAnthropic, cors, verifyAuth, AuthError } = require('./_lib');
 
 module.exports = async function(req, res) {
   cors(res);
@@ -14,6 +14,8 @@ module.exports = async function(req, res) {
     if (!history || history.length < 2) {
       return res.status(400).json({ error: 'プロフィール生成には2回以上の分析が必要です' });
     }
+    // Input size limits (prevent API cost abuse)
+    if (history.length > 100) return res.status(400).json({ error: '履歴は最大100件までです' });
 
     // Aggregate scores
     const scores = history.map(h => h.score || 0);
@@ -70,6 +72,7 @@ module.exports = async function(req, res) {
     return res.json({ success: true, data });
 
   } catch(e) {
-    return res.status(500).json({ error: e.message });
+    if (e instanceof AuthError) return res.status(401).json({ error: e.message });
+    return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
 };
