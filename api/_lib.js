@@ -149,51 +149,6 @@ function cors(res) {
   res.setHeader('Vary', 'Origin');
 }
 
-// JWT verification using Node.js built-in crypto (no external dependencies)
-// Verifies HS256 signature, expiration, and payload structure
-function verifyJWT(token, secret) {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('無効なトークン形式です');
-
-  const [headerB64, payloadB64, signatureB64] = parts;
-
-  // Verify HMAC-SHA256 signature using native crypto
-  const crypto = require('crypto');
-  const signingInput = `${headerB64}.${payloadB64}`;
-  const expectedSig = crypto
-    .createHmac('sha256', secret)
-    .update(signingInput)
-    .digest('base64url');
-
-  // Constant-time comparison to prevent timing attacks
-  const sigBuf = Buffer.from(signatureB64);
-  const expBuf = Buffer.from(expectedSig);
-  const signaturesMatch = sigBuf.length === expBuf.length &&
-    crypto.timingSafeEqual(sigBuf, expBuf);
-  if (!signaturesMatch) throw new Error('トークンの署名が無効です');
-
-  // Decode and validate payload
-  const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-
-  // Check expiration
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp && payload.exp < now) throw new Error('トークンの有効期限が切れています');
-  if (payload.nbf && payload.nbf > now) throw new Error('トークンがまだ有効ではありません');
-
-  // Validate audience (aud): Supabase tokens must target 'authenticated'
-  if (payload.aud && payload.aud !== 'authenticated') {
-    throw new Error(`トークンのaud（対象者）が無効です: ${payload.aud}`);
-  }
-
-  // Validate issuer (iss): must match Supabase project URL
-  const supabaseUrl = process.env.SUPABASE_URL;
-  if (supabaseUrl && payload.iss && payload.iss !== `${supabaseUrl}/auth/v1`) {
-    throw new Error(`トークンのiss（発行者）が無効です: ${payload.iss}`);
-  }
-
-  return payload;
-}
-
 // Auth error class to distinguish auth failures from server errors
 class AuthError extends Error {
   constructor(message) {
@@ -202,7 +157,8 @@ class AuthError extends Error {
   }
 }
 
-// JWT verification helper - validates Supabase JWT token from Authorization header
+// Auth verification helper - delegates token validation to Supabase Auth server.
+// This works with both legacy shared-secret JWTs and newer signing-key setups.
 async function verifyAuth(req) {
   const authHeader = req.headers.authorization || '';
   if (!authHeader.startsWith('Bearer ')) {
@@ -212,13 +168,38 @@ async function verifyAuth(req) {
   const token = authHeader.slice(7);
   if (!token) throw new AuthError('トークンが空です');
 
-  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
-  if (!jwtSecret) throw new Error('サーバー設定エラー: SUPABASE_JWT_SECRET が未設定です');
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEYS;
+  if (!supabaseUrl) throw new Error('サーバー設定エラー: SUPABASE_URL が未設定です');
+  if (!anonKey) throw new Error('サーバー設定エラー: SUPABASE_ANON_KEYS が未設定です');
 
   try {
-    const payload = verifyJWT(token, jwtSecret);
-    if (!payload.sub) throw new AuthError('トークンにユーザーIDがありません');
-    return payload;
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      method: 'GET',
+      headers: {
+        apikey: anonKey,
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new AuthError('認証エラー: トークンが無効です');
+      }
+      const body = await response.json().catch(() => ({}));
+      const msg = body?.msg || body?.error_description || body?.error || response.statusText;
+      throw new Error(`Supabase Auth 検証エラー (${response.status}): ${msg}`);
+    }
+
+    const user = await response.json();
+    if (!user?.id) throw new AuthError('認証エラー: ユーザー情報を取得できませんでした');
+
+    return {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      user
+    };
   } catch(e) {
     // Re-throw AuthError as-is; wrap others
     if (e.isAuthError) throw e;
