@@ -1310,10 +1310,13 @@ async function runAnalysis() {
   showLoading();
   startLoadingAnimation();
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
   try {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${appState.accessToken}` },
+      signal: controller.signal,
       body: JSON.stringify({ meeting_log: log, context, participants, my_name: myName })
     });
 
@@ -1368,8 +1371,14 @@ async function runAnalysis() {
     document.getElementById('input-log').value = '';
 
   } catch(e) {
+    console.error('runAnalysis error:', e);
     hideLoading();
-    showAlert(al, e.message || '予期しないエラーが発生しました');
+    const message = e?.name === 'AbortError'
+      ? '分析がタイムアウトしました。しばらくしてから再試行してください'
+      : (e.message || '予期しないエラーが発生しました');
+    showAlert(al, message);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

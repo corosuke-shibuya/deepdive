@@ -108,12 +108,28 @@ function extractJson(text) {
   }
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`外部APIの応答がタイムアウトしました (${timeoutMs}ms)`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Call Anthropic API using server-side key
 async function callAnthropic(prompt) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('サーバー設定エラー: ANTHROPIC_API_KEY が未設定です');
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetchWithTimeout('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': apiKey,
@@ -125,7 +141,7 @@ async function callAnthropic(prompt) {
       max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }]
     })
-  });
+  }, 45000);
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -174,13 +190,13 @@ async function verifyAuth(req) {
   if (!anonKey) throw new Error('サーバー設定エラー: SUPABASE_ANON_KEYS が未設定です');
 
   try {
-    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    const response = await fetchWithTimeout(`${supabaseUrl}/auth/v1/user`, {
       method: 'GET',
       headers: {
         apikey: anonKey,
         Authorization: `Bearer ${token}`
       }
-    });
+    }, 10000);
 
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) {
@@ -203,6 +219,7 @@ async function verifyAuth(req) {
   } catch(e) {
     // Re-throw AuthError as-is; wrap others
     if (e.isAuthError) throw e;
+    console.error('verifyAuth error:', e);
     throw new AuthError(`認証エラー: ${e.message}`);
   }
 }
