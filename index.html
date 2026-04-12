@@ -371,6 +371,39 @@
     .lstep-text { flex:1; text-align:left; }
     .lstep-check { flex-shrink:0; }
 
+    /* ===== HR DASHBOARD ===== */
+    .hr-kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .hr-kpi-card {
+      background: var(--card); border-radius: var(--radius);
+      border: 1px solid var(--border); padding: 20px 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .hr-kpi-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+    .hr-kpi-value { font-size: 32px; font-weight: 800; color: var(--primary); }
+    .hr-kpi-unit { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+    .hr-section { margin-bottom: 28px; }
+    .hr-section-title {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      margin-bottom: 14px; padding-bottom: 8px;
+      border-bottom: 2px solid var(--border);
+    }
+    .hr-skill-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .hr-skill-name { width: 70px; font-size: 13px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+    .hr-skill-bar-wrap { flex: 1; height: 10px; background: #E2E8F0; border-radius: 5px; overflow: hidden; }
+    .hr-skill-bar { height: 100%; border-radius: 5px; transition: width .4s ease; }
+    .hr-skill-score { width: 36px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+    .hr-skill-delta { width: 48px; font-size: 12px; font-weight: 600; text-align: right; flex-shrink: 0; }
+    .delta-up { color: var(--success); }
+    .delta-down { color: var(--danger); }
+    .delta-flat { color: var(--muted); }
+    .hr-privacy-banner {
+      background: #FEF3C7; border: 1px solid #FDE68A; border-radius: 10px;
+      padding: 20px 24px; text-align: center; color: #92400E;
+      font-size: 14px; margin-top: 24px;
+    }
+    .hr-privacy-banner strong { display: block; font-size: 16px; margin-bottom: 6px; }
+    .hr-chart-wrap { background: var(--card); border-radius: var(--radius); border: 1px solid var(--border); padding: 20px; margin-bottom: 24px; }
+
     /* ===== RESPONSIVE ===== */
     @media (max-width: 768px) {
       #sidebar { transform: translateX(-100%); }
@@ -378,6 +411,7 @@
       #main { margin-left: 0; }
       .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .page { padding: 16px; }
+      .hr-kpi-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -410,6 +444,10 @@
     </div>
     <div class="nav-item" data-page="settings">
       <span class="nav-icon">⚙️</span> 設定
+    </div>
+    <!-- HR nav: hidden by default, shown if hr_general or hr_admin -->
+    <div class="nav-item" data-page="hr-dashboard" id="nav-hr" style="display:none">
+      <span class="nav-icon">🏢</span> HR管理
     </div>
   </div>
   <div class="sidebar-footer">
@@ -983,6 +1021,88 @@
     </div>
   </div>
 
+  <!-- HR DASHBOARD PAGE -->
+  <div id="page-hr-dashboard" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">🏢 HR管理ダッシュボード</h2>
+      <p class="page-subtitle">チームのコミュニケーションスキル向上状況</p>
+    </div>
+
+    <!-- プライバシーブロック時 -->
+    <div id="hr-privacy-block" style="display:none">
+      <div class="hr-privacy-banner">
+        <strong>🔒 データを表示するには5名以上が必要です</strong>
+        <span id="hr-privacy-msg">プライバシー保護のため、メンバーが5名以上になるとデータが表示されます。</span>
+      </div>
+    </div>
+
+    <!-- ダッシュボード本体 -->
+    <div id="hr-main-content" style="display:none">
+
+      <!-- F-01: KPI カード -->
+      <div class="hr-section">
+        <div class="hr-section-title">📊 利用状況（直近30日）</div>
+        <div class="hr-kpi-grid">
+          <div class="hr-kpi-card">
+            <div class="hr-kpi-label">ログイン率</div>
+            <div><span class="hr-kpi-value" id="hr-kpi-login">—</span><span class="hr-kpi-unit">%</span></div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px" id="hr-kpi-login-sub">— / —名</div>
+          </div>
+          <div class="hr-kpi-card">
+            <div class="hr-kpi-label">振り返り閲覧数</div>
+            <div><span class="hr-kpi-value" id="hr-kpi-reflections">—</span><span class="hr-kpi-unit">回</span></div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">直近30日間の合計</div>
+          </div>
+          <div class="hr-kpi-card">
+            <div class="hr-kpi-label">1人当たり振り返り閲覧数</div>
+            <div><span class="hr-kpi-value" id="hr-kpi-per-user">—</span><span class="hr-kpi-unit">回</span></div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">アクティブユーザー平均</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- F-02: スコア週次推移 -->
+      <div class="hr-section">
+        <div class="hr-section-title">📈 チームスコア推移（直近8週）</div>
+        <div class="hr-chart-wrap">
+          <canvas id="hr-score-chart" height="80"></canvas>
+        </div>
+      </div>
+
+      <!-- F-03: スキル別スコア分析 -->
+      <div class="hr-section">
+        <div class="hr-section-title">🎯 スキル別スコア分析（当月 vs 前月）</div>
+        <div class="card" style="padding:20px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:12px;color:var(--muted)">
+            <span>スキル</span>
+            <span style="flex:1;text-align:right;margin-right:84px">当月スコア</span>
+            <span style="width:48px;text-align:right">前月比</span>
+          </div>
+          <div id="hr-skill-bars"></div>
+        </div>
+      </div>
+
+      <!-- F-04: ユーザー管理（hr_admin のみ）-->
+      <div class="hr-section" id="hr-admin-section" style="display:none">
+        <div class="hr-section-title">👥 メンバー管理</div>
+        <div class="card">
+          <p style="font-size:13px;color:var(--muted);margin-bottom:12px">テナントに所属するメンバー一覧です。</p>
+          <div id="hr-user-list" style="font-size:13px"></div>
+        </div>
+      </div>
+
+    </div><!-- /hr-main-content -->
+
+    <!-- ローディング -->
+    <div id="hr-loading" style="text-align:center;padding:48px;color:var(--muted);font-size:14px;display:none">
+      <div class="spinner" style="margin:0 auto 12px"></div>
+      データを読み込み中...
+    </div>
+
+    <!-- エラー -->
+    <div id="hr-error" style="display:none;color:var(--danger);font-size:14px;padding:16px;background:var(--danger-light);border-radius:8px;margin-top:16px"></div>
+  </div>
+
 </main>
 
 <!-- App Init Loading -->
@@ -1011,7 +1131,9 @@ let appState = {
   prepSelected: [],
   prepManual: [],
   myprofileCache: null,
-  charts: {}
+  charts: {},
+  hrRole: null,      // null | 'hr_general' | 'hr_admin'
+  hrCache: null      // キャッシュ済みHRダッシュボードデータ
 };
 
 // ===== INIT =====
@@ -1082,6 +1204,13 @@ async function loadUserData(user) {
     appState.myprofileCache = null;
   }
 
+  // HR役割チェック（サイレント失敗: HR権限がなければそのまま続行）
+  try {
+    await checkHRRole();
+  } catch(e) {
+    console.log('HR role check skipped:', e.message);
+  }
+
   // 準備履歴の localStorage → Supabase 移行クリーンアップ。
   // 旧キーが残っていれば削除する（データは Supabase に移行済み）。
   const legacyPrepKey = `deepdive_prepHistory_${user.id}`;
@@ -1098,6 +1227,8 @@ function clearState() {
   appState.myprofileCache = null;
   appState.prepSelected = [];
   appState.prepManual = [];
+  appState.hrRole = null;
+  appState.hrCache = null;
   Object.values(appState.charts).forEach(c => c?.destroy?.());
   appState.charts = {};
 }
@@ -1286,6 +1417,7 @@ function navigate(page) {
   if (page === 'prep') renderPrepPage();
   if (page === 'prep-history') renderPrepHistory();
   if (page === 'myprofile') initMyProfile();
+  if (page === 'hr-dashboard') initHRDashboard();
   if (page === 'settings') {
     document.getElementById('settings-name').value = appState.userName;
     document.getElementById('settings-email').value = appState.userEmail;
@@ -2153,6 +2285,199 @@ function renderMyProfile(d) {
   document.getElementById('myprofile-nextfocus').textContent = d.next_focus || '';
   const atEl = document.getElementById('myprofile-generated-at');
   atEl.textContent = d.generatedAt ? `最終生成: ${d.generatedAt}（${d.sessionCount || 0}回分の分析をもとに作成）` : '';
+}
+
+// ===== HR DASHBOARD =====
+
+async function checkHRRole() {
+  // tenant_users テーブルを直接 Supabase クライアントで参照
+  const { data, error } = await supabaseClient
+    .from('tenant_users')
+    .select('tenant_id, role')
+    .eq('user_id', appState.userId)
+    .in('role', ['hr_general', 'hr_admin'])
+    .limit(1);
+
+  if (error || !data || data.length === 0) {
+    appState.hrRole = null;
+    document.getElementById('nav-hr').style.display = 'none';
+    return;
+  }
+
+  appState.hrRole = data[0].role;
+  document.getElementById('nav-hr').style.display = 'flex';
+}
+
+async function initHRDashboard() {
+  const loading = document.getElementById('hr-loading');
+  const mainContent = document.getElementById('hr-main-content');
+  const privacyBlock = document.getElementById('hr-privacy-block');
+  const errorEl = document.getElementById('hr-error');
+
+  // キャッシュがあればそのまま再描画
+  if (appState.hrCache) {
+    renderHRData(appState.hrCache);
+    return;
+  }
+
+  loading.style.display = 'block';
+  mainContent.style.display = 'none';
+  privacyBlock.style.display = 'none';
+  errorEl.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/hr-dashboard', {
+      headers: { Authorization: `Bearer ${appState.accessToken}` }
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || `エラー (${res.status})`);
+    }
+
+    appState.hrCache = data;
+    renderHRData(data);
+
+  } catch(e) {
+    errorEl.textContent = '⚠️ データの取得に失敗しました: ' + e.message;
+    errorEl.style.display = 'block';
+  } finally {
+    loading.style.display = 'none';
+  }
+}
+
+function renderHRData(data) {
+  const mainContent = document.getElementById('hr-main-content');
+  const privacyBlock = document.getElementById('hr-privacy-block');
+
+  // プライバシーブロック
+  if (data.privacy_block) {
+    privacyBlock.style.display = 'block';
+    mainContent.style.display = 'none';
+    document.getElementById('hr-privacy-msg').textContent = data.message || '';
+    return;
+  }
+
+  privacyBlock.style.display = 'none';
+  mainContent.style.display = 'block';
+
+  // F-01: KPI
+  const kpi = data.kpi || {};
+  document.getElementById('hr-kpi-login').textContent = kpi.login_rate ?? '—';
+  document.getElementById('hr-kpi-reflections').textContent = kpi.total_reflections ?? '—';
+  document.getElementById('hr-kpi-per-user').textContent = kpi.reflections_per_user ?? '—';
+  document.getElementById('hr-kpi-login-sub').textContent =
+    data.total_members ? `全${data.total_members}名中` : '';
+
+  // F-02: スコア推移チャート
+  renderHRScoreChart(data.score_trend || []);
+
+  // F-03: スキル別バー
+  renderHRSkillBars(data.skill_scores || []);
+
+  // F-04: ユーザー管理（hr_admin のみ）
+  const adminSection = document.getElementById('hr-admin-section');
+  if (data.hr_role === 'hr_admin' && data.user_list) {
+    adminSection.style.display = 'block';
+    const listEl = document.getElementById('hr-user-list');
+    listEl.innerHTML = data.user_list.length === 0
+      ? '<p style="color:var(--muted)">メンバーなし</p>'
+      : data.user_list.map((u, i) =>
+          `<div style="padding:8px 0;border-bottom:1px solid var(--border);color:var(--text)">
+            ${i + 1}. <code style="font-size:12px;color:var(--muted)">${escapeHtml(u.user_id)}</code>
+          </div>`
+        ).join('');
+  } else {
+    adminSection.style.display = 'none';
+  }
+}
+
+function renderHRScoreChart(trend) {
+  const ctx = document.getElementById('hr-score-chart').getContext('2d');
+
+  // 既存チャートを破棄
+  if (appState.charts.hrScore) {
+    appState.charts.hrScore.destroy();
+    appState.charts.hrScore = null;
+  }
+
+  const labels = trend.map(t => {
+    const d = new Date(t.week);
+    return `${d.getMonth() + 1}/${d.getDate()}週`;
+  });
+  const scores = trend.map(t => t.avg_score);
+
+  appState.charts.hrScore = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'チーム平均スコア',
+        data: scores,
+        borderColor: '#2563EB',
+        backgroundColor: 'rgba(37,99,235,0.08)',
+        borderWidth: 2.5,
+        pointBackgroundColor: '#2563EB',
+        pointRadius: 4,
+        tension: 0.35,
+        fill: true,
+        spanGaps: true
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => `平均スコア: ${ctx.parsed.y ?? '—'}点`
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 0, max: 100,
+          grid: { color: 'rgba(0,0,0,.05)' },
+          ticks: { font: { size: 11 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+
+function renderHRSkillBars(skills) {
+  const el = document.getElementById('hr-skill-bars');
+  if (!skills.length) {
+    el.innerHTML = '<p style="color:var(--muted);font-size:13px">データがありません</p>';
+    return;
+  }
+
+  el.innerHTML = skills.map(s => {
+    const score = s.this_month ?? 0;
+    const barColor = score >= 70 ? '#059669' : score >= 50 ? '#D97706' : '#DC2626';
+    const deltaNum = s.delta;
+    let deltaHtml = '<span class="delta-flat">—</span>';
+    if (deltaNum != null) {
+      const sign = deltaNum > 0 ? '+' : '';
+      const cls = deltaNum > 0 ? 'delta-up' : deltaNum < 0 ? 'delta-down' : 'delta-flat';
+      deltaHtml = `<span class="${cls}">${sign}${deltaNum}</span>`;
+    }
+    const scoreDisplay = s.this_month != null ? s.this_month : '—';
+
+    return `
+    <div class="hr-skill-row">
+      <div class="hr-skill-name">${escapeHtml(s.name)}</div>
+      <div class="hr-skill-bar-wrap">
+        <div class="hr-skill-bar" style="width:${score}%;background:${barColor}"></div>
+      </div>
+      <div class="hr-skill-score" style="color:${barColor}">${scoreDisplay}</div>
+      <div class="hr-skill-delta">${deltaHtml}</div>
+    </div>`;
+  }).join('');
 }
 
 // ===== HELPERS =====
