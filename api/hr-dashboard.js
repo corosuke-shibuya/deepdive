@@ -93,9 +93,9 @@ module.exports = async function(req, res) {
 
     const { tenant_id, role: hrRole } = tuRows[0];
 
-    // 3. テナントメンバー一覧取得（user_id リスト）
+    // 3. テナントメンバー一覧取得（名前・部署含む）
     const allMembers = await sbQuery('tenant_users', {
-      select: 'user_id',
+      select: 'user_id,role,display_name,department',
       tenant_id: `eq.${tenant_id}`
     });
     const memberUserIds = (allMembers || []).map(m => m.user_id);
@@ -223,9 +223,10 @@ module.exports = async function(req, res) {
     let userList = null;
     if (hrRole === 'hr_admin') {
       userList = (allMembers || []).map(m => ({
-        user_id: m.user_id
-        // 名前・メールは別途 Supabase Admin SDK で取得が必要
-        // MVP では user_id のみ返す
+        user_id: m.user_id,
+        display_name: m.display_name || null,
+        department: m.department || null,
+        role: m.role
       }));
     }
 

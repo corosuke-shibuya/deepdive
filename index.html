@@ -1085,9 +1085,18 @@
       <!-- F-04: ユーザー管理（hr_admin のみ）-->
       <div class="hr-section" id="hr-admin-section" style="display:none">
         <div class="hr-section-title">👥 メンバー管理</div>
-        <div class="card">
-          <p style="font-size:13px;color:var(--muted);margin-bottom:12px">テナントに所属するメンバー一覧です。</p>
-          <div id="hr-user-list" style="font-size:13px"></div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+                <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">氏名</th>
+                <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">部署</th>
+                <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">権限</th>
+                <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">操作</th>
+              </tr>
+            </thead>
+            <tbody id="hr-user-list"></tbody>
+          </table>
         </div>
       </div>
 
@@ -2387,15 +2396,86 @@ function renderHRData(data) {
   if (data.hr_role === 'hr_admin' && data.user_list) {
     adminSection.style.display = 'block';
     const listEl = document.getElementById('hr-user-list');
+    const roleLabel = { hr_admin: '管理者', hr_general: 'HR閲覧', user: '一般' };
     listEl.innerHTML = data.user_list.length === 0
-      ? '<p style="color:var(--muted)">メンバーなし</p>'
-      : data.user_list.map((u, i) =>
-          `<div style="padding:8px 0;border-bottom:1px solid var(--border);color:var(--text)">
-            ${i + 1}. <code style="font-size:12px;color:var(--muted)">${escapeHtml(u.user_id)}</code>
-          </div>`
+      ? `<tr><td colspan="4" style="padding:16px;color:var(--muted)">メンバーなし</td></tr>`
+      : data.user_list.map(u => `
+          <tr style="border-bottom:1px solid var(--border)" id="row-${u.user_id}">
+            <td style="padding:12px 16px">
+              <span id="name-${u.user_id}">${escapeHtml(u.display_name || '（未設定）')}</span>
+              <input id="name-input-${u.user_id}" type="text" value="${escapeHtml(u.display_name || '')}"
+                placeholder="氏名を入力"
+                style="display:none;padding:6px 10px;border:1.5px solid var(--accent);border-radius:6px;font-size:13px;width:140px" />
+            </td>
+            <td style="padding:12px 16px">
+              <span id="dept-${u.user_id}">${escapeHtml(u.department || '（未設定）')}</span>
+              <input id="dept-input-${u.user_id}" type="text" value="${escapeHtml(u.department || '')}"
+                placeholder="部署名を入力"
+                style="display:none;padding:6px 10px;border:1.5px solid var(--accent);border-radius:6px;font-size:13px;width:140px" />
+            </td>
+            <td style="padding:12px 16px">
+              <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;
+                background:${u.role==='hr_admin'?'var(--accent-light)':u.role==='hr_general'?'var(--success-light)':'var(--bg)'};
+                color:${u.role==='hr_admin'?'var(--accent)':u.role==='hr_general'?'var(--success)':'var(--muted)'}">
+                ${roleLabel[u.role] || u.role}
+              </span>
+            </td>
+            <td style="padding:12px 16px">
+              <button class="btn btn-sm btn-outline" id="edit-btn-${u.user_id}"
+                onclick="hrEditMember('${u.user_id}')">編集</button>
+              <button class="btn btn-sm btn-success" id="save-btn-${u.user_id}"
+                style="display:none" onclick="hrSaveMember('${u.user_id}')">保存</button>
+            </td>
+          </tr>`
         ).join('');
   } else {
     adminSection.style.display = 'none';
+  }
+}
+
+function hrEditMember(userId) {
+  // 表示→入力欄に切り替え
+  document.getElementById(`name-${userId}`).style.display = 'none';
+  document.getElementById(`dept-${userId}`).style.display = 'none';
+  document.getElementById(`name-input-${userId}`).style.display = 'inline-block';
+  document.getElementById(`dept-input-${userId}`).style.display = 'inline-block';
+  document.getElementById(`edit-btn-${userId}`).style.display = 'none';
+  document.getElementById(`save-btn-${userId}`).style.display = 'inline-flex';
+}
+
+async function hrSaveMember(userId) {
+  const newName = document.getElementById(`name-input-${userId}`).value.trim();
+  const newDept = document.getElementById(`dept-input-${userId}`).value.trim();
+  const saveBtn = document.getElementById(`save-btn-${userId}`);
+  saveBtn.disabled = true;
+  saveBtn.textContent = '保存中...';
+
+  try {
+    const { error } = await supabaseClient
+      .from('tenant_users')
+      .update({ display_name: newName || null, department: newDept || null })
+      .eq('user_id', userId);
+
+    if (error) throw error;
+
+    // 表示を更新
+    document.getElementById(`name-${userId}`).textContent = newName || '（未設定）';
+    document.getElementById(`dept-${userId}`).textContent = newDept || '（未設定）';
+    document.getElementById(`name-${userId}`).style.display = '';
+    document.getElementById(`dept-${userId}`).style.display = '';
+    document.getElementById(`name-input-${userId}`).style.display = 'none';
+    document.getElementById(`dept-input-${userId}`).style.display = 'none';
+    document.getElementById(`edit-btn-${userId}`).style.display = '';
+    saveBtn.style.display = 'none';
+
+    // キャッシュをクリア（次回再取得）
+    appState.hrCache = null;
+
+  } catch(e) {
+    alert('保存に失敗しました: ' + e.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '保存';
   }
 }
 
