@@ -1401,7 +1401,14 @@ function showApp() {
   document.getElementById('sidebar').style.display = 'flex';
   document.getElementById('main').style.marginLeft = 'var(--sidebar-w)';
   document.getElementById('sidebar-user').textContent = appState.userName || 'ユーザー';
-  navigate('dashboard');
+
+  if (appState.hrRole) {
+    // HRユーザー: 通常ナビを隠してHR管理のみ表示
+    document.querySelectorAll('.nav-item:not(#nav-hr)').forEach(n => n.style.display = 'none');
+    navigate('hr-dashboard');
+  } else {
+    navigate('dashboard');
+  }
 }
 
 function navigate(page) {
