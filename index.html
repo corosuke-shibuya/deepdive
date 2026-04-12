@@ -452,7 +452,14 @@
   </div>
   <div class="sidebar-footer">
     <div id="sidebar-user" style="font-weight:600;color:rgba(255,255,255,.75);margin-bottom:4px;">—</div>
-    <div>Deep Dive v1.0</div>
+    <div style="margin-bottom:8px">Deep Dive v1.0</div>
+    <div onclick="signOut()" style="cursor:pointer;font-size:12px;color:rgba(255,255,255,.5);
+      padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.15);
+      text-align:center;transition:all .2s"
+      onmouseover="this.style.background='rgba(255,255,255,.1)'"
+      onmouseout="this.style.background='transparent'">
+      🚪 ログアウト
+    </div>
   </div>
 </nav>
 
@@ -1012,9 +1019,17 @@
             onclick="signOut()">
             🚪 ログアウト
           </button>
-          <button class="btn btn-sm" style="background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5"
+          <!-- テナント未所属ユーザーのみ即時削除可 -->
+          <button class="btn btn-sm" id="btn-delete-all"
+            style="background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5"
             onclick="clearAllData()">
             🗑 すべてのデータを削除
+          </button>
+          <!-- テナント所属ユーザーは申請ボタンに切り替わる -->
+          <button class="btn btn-sm" id="btn-request-delete"
+            style="display:none;background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5"
+            onclick="requestDeletion()">
+            🗑 データ削除を申請する
           </button>
         </div>
       </div>
@@ -1100,6 +1115,14 @@
         </div>
       </div>
 
+      <!-- 削除申請の承認（hr_admin のみ）-->
+      <div class="hr-section" id="hr-deletion-section" style="display:none">
+        <div class="hr-section-title">🗑 データ削除申請</div>
+        <div id="hr-deletion-list">
+          <p style="font-size:13px;color:var(--muted)">申請はありません。</p>
+        </div>
+      </div>
+
     </div><!-- /hr-main-content -->
 
     <!-- ローディング -->
@@ -1142,7 +1165,8 @@ let appState = {
   myprofileCache: null,
   charts: {},
   hrRole: null,      // null | 'hr_general' | 'hr_admin'
-  hrCache: null      // キャッシュ済みHRダッシュボードデータ
+  hrCache: null,     // キャッシュ済みHRダッシュボードデータ
+  tenantId: null     // 所属テナントID
 };
 
 // ===== INIT =====
@@ -1411,11 +1435,13 @@ function showApp() {
   document.getElementById('main').style.marginLeft = 'var(--sidebar-w)';
   document.getElementById('sidebar-user').textContent = appState.userName || 'ユーザー';
 
-  if (appState.hrRole) {
-    // HRユーザー: 通常ナビを隠してHR管理のみ表示
+  if (appState.hrRole === 'hr_admin') {
+    // 専任HR管理者: HR管理画面のみ表示
     document.querySelectorAll('.nav-item:not(#nav-hr)').forEach(n => n.style.display = 'none');
     navigate('hr-dashboard');
   } else {
+    // hr_general（兼任）または一般ユーザー: 通常画面を表示
+    // HR閲覧権限があればサイドバーにHR管理タブも表示済み（checkHRRoleで制御）
     navigate('dashboard');
   }
 }
@@ -2305,6 +2331,31 @@ function renderMyProfile(d) {
 
 // ===== HR DASHBOARD =====
 
+// ===== データ削除申請 =====
+async function requestDeletion() {
+  const reason = window.prompt('削除理由を入力してください（任意）：', '');
+  if (reason === null) return; // キャンセル
+
+  if (!confirm('データ削除をHR管理者に申請します。よろしいですか？')) return;
+
+  try {
+    const { error } = await supabaseClient
+      .from('deletion_requests')
+      .insert({
+        user_id: appState.userId,
+        tenant_id: appState.tenantId,
+        reason: reason || null,
+        status: 'pending'
+      });
+
+    if (error) throw error;
+    alert('✅ 削除申請を送信しました。HR管理者が確認後、対応いたします。');
+    appState.hrCache = null; // HRキャッシュをクリアして次回再取得
+  } catch(e) {
+    alert('申請に失敗しました: ' + e.message);
+  }
+}
+
 async function checkHRRole() {
   // tenant_users テーブルを直接 Supabase クライアントで参照
   const { data, error } = await supabaseClient
@@ -2322,6 +2373,15 @@ async function checkHRRole() {
 
   appState.hrRole = data[0].role;
   document.getElementById('nav-hr').style.display = 'flex';
+
+  // テナント所属ユーザーは即時削除→申請ボタンに切り替え
+  const deleteBtn = document.getElementById('btn-delete-all');
+  const requestBtn = document.getElementById('btn-request-delete');
+  if (deleteBtn) deleteBtn.style.display = 'none';
+  if (requestBtn) requestBtn.style.display = 'inline-flex';
+
+  // テナントIDをappStateに保存（削除申請時に使用）
+  appState.tenantId = data[0].tenant_id;
 }
 
 async function initHRDashboard() {
@@ -2391,6 +2451,15 @@ function renderHRData(data) {
   // F-03: スキル別バー
   renderHRSkillBars(data.skill_scores || []);
 
+  // 削除申請セクション（hr_admin のみ）
+  const deletionSection = document.getElementById('hr-deletion-section');
+  if (data.hr_role === 'hr_admin') {
+    deletionSection.style.display = 'block';
+    loadDeletionRequests(data.tenant_id);
+  } else {
+    deletionSection.style.display = 'none';
+  }
+
   // F-04: ユーザー管理（hr_admin のみ）
   const adminSection = document.getElementById('hr-admin-section');
   if (data.hr_role === 'hr_admin' && data.user_list) {
@@ -2430,6 +2499,80 @@ function renderHRData(data) {
         ).join('');
   } else {
     adminSection.style.display = 'none';
+  }
+}
+
+// ===== 削除申請管理 =====
+async function loadDeletionRequests(tenantId) {
+  const el = document.getElementById('hr-deletion-list');
+  const { data, error } = await supabaseClient
+    .from('deletion_requests')
+    .select('id, user_id, reason, status, requested_at')
+    .eq('tenant_id', tenantId)
+    .eq('status', 'pending')
+    .order('requested_at', { ascending: false });
+
+  if (error || !data || data.length === 0) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--muted)">現在、申請はありません。</p>';
+    return;
+  }
+
+  el.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--bg);border-bottom:1px solid var(--border)">
+          <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">申請者</th>
+          <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">理由</th>
+          <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">申請日時</th>
+          <th style="padding:12px 16px;text-align:left;font-weight:600;color:var(--muted)">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.map(r => {
+          const date = new Date(r.requested_at).toLocaleDateString('ja-JP');
+          return `<tr style="border-bottom:1px solid var(--border)" id="del-row-${r.id}">
+            <td style="padding:12px 16px;color:var(--muted);font-size:12px">${r.user_id.slice(0,8)}...</td>
+            <td style="padding:12px 16px">${escapeHtml(r.reason || '（理由なし）')}</td>
+            <td style="padding:12px 16px;color:var(--muted)">${date}</td>
+            <td style="padding:12px 16px;display:flex;gap:8px">
+              <button class="btn btn-sm" style="background:var(--danger-light);color:var(--danger);border:1px solid #FCA5A5"
+                onclick="reviewDeletion('${r.id}','${r.user_id}','approved')">✅ 承認</button>
+              <button class="btn btn-sm btn-outline"
+                onclick="reviewDeletion('${r.id}','${r.user_id}','rejected')">❌ 却下</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+async function reviewDeletion(requestId, targetUserId, decision) {
+  const label = decision === 'approved' ? '承認（データを削除）' : '却下';
+  if (!confirm(`この申請を${label}しますか？`)) return;
+
+  try {
+    // ステータス更新
+    const { error: updateErr } = await supabaseClient
+      .from('deletion_requests')
+      .update({ status: decision, reviewed_at: new Date().toISOString(), reviewed_by: appState.userId })
+      .eq('id', requestId);
+    if (updateErr) throw updateErr;
+
+    // 承認の場合はユーザーのmeetingsデータを削除
+    if (decision === 'approved') {
+      const { error: delErr } = await supabaseClient
+        .from('meetings')
+        .delete()
+        .eq('user_id', targetUserId);
+      if (delErr) throw delErr;
+    }
+
+    // 行を削除
+    document.getElementById(`del-row-${requestId}`)?.remove();
+    alert(decision === 'approved' ? '✅ データを削除しました。' : '❌ 申請を却下しました。');
+  } catch(e) {
+    alert('処理に失敗しました: ' + e.message);
   }
 }
 
