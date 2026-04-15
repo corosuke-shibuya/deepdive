@@ -198,6 +198,26 @@ module.exports = async function handler(req, res) {
   // 先に200を返す（Zoomは5秒でタイムアウト）
   res.status(200).json({ received: true });
 
+  // デバッグ: 受信したイベントをSupabaseに記録
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  fetch(`${supabaseUrl}/rest/v1/meetings`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({
+      user_id: '00000000-0000-0000-0000-000000000000',
+      title: `[DEBUG] zoom event: ${body.event}`,
+      date: new Date().toISOString(),
+      source: 'zoom',
+      data: { event: body.event, payload_keys: Object.keys(body.payload || {}) },
+    }),
+  }).catch(() => {});
+
   if (body.event === 'recording.transcript_completed') {
     processTranscript(body.payload).catch(err =>
       console.error('transcript処理エラー:', err)
