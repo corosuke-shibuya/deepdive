@@ -5,8 +5,6 @@
 // =============================================
 const crypto = require('crypto');
 
-export const config = { api: { bodyParser: false } };
-
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
