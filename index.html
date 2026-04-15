@@ -1012,6 +1012,24 @@
       <button class="btn btn-primary" style="width:auto" onclick="saveSettings()">
         💾 保存する
       </button>
+      <!-- 会議ツール連携 -->
+      <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--border)">
+        <p class="card-title" style="margin-bottom:16px">🔗 会議ツール連携</p>
+        <div id="zoom-integration-card" style="display:flex;align-items:center;justify-content:space-between;padding:16px;border:1px solid var(--border);border-radius:12px;background:#F8FAFC">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:28px">🎥</span>
+            <div>
+              <div style="font-weight:600;font-size:15px">Zoom</div>
+              <div id="zoom-integration-status" style="font-size:13px;color:var(--muted)">確認中...</div>
+            </div>
+          </div>
+          <button id="zoom-integration-btn" class="btn btn-sm btn-primary" onclick="connectZoom()" style="width:auto">
+            連携する
+          </button>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-top:8px">連携すると、Zoom会議のトランスクリプトが自動で取り込まれます。</p>
+      </div>
+
       <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--border)">
         <p style="font-size:13px;color:var(--muted);margin-bottom:12px">⚠️ アカウント操作</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -1203,6 +1221,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.nav-item').forEach(el => {
       el.addEventListener('click', () => navigate(el.dataset.page));
     });
+
+    // Zoom OAuth 完了後のリダイレクト処理
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('integration') === 'zoom') {
+      const status = urlParams.get('status');
+      // URLパラメータをきれいにする
+      window.history.replaceState({}, '', window.location.pathname);
+      if (status === 'success') {
+        setTimeout(() => {
+          navigate('settings');
+          const al = document.getElementById('settings-alert');
+          if (al) {
+            al.textContent = '✅ Zoomの連携が完了しました！';
+            al.className = 'alert alert-success show';
+            setTimeout(() => { al.className = 'alert'; }, 4000);
+          }
+        }, 500);
+      } else if (status === 'error') {
+        setTimeout(() => {
+          navigate('settings');
+          const al = document.getElementById('settings-alert');
+          if (al) {
+            al.textContent = '❌ Zoom連携に失敗しました。もう一度お試しください。';
+            al.className = 'alert alert-error show';
+            setTimeout(() => { al.className = 'alert'; }, 4000);
+          }
+        }, 500);
+      }
+    }
   } catch(e) {
     console.error('Init error:', e);
     showAuth();
@@ -1463,6 +1510,7 @@ function navigate(page) {
   if (page === 'settings') {
     document.getElementById('settings-name').value = appState.userName;
     document.getElementById('settings-email').value = appState.userEmail;
+    loadZoomIntegration();
   }
 }
 
@@ -2184,6 +2232,61 @@ async function renderPrepHistory() {
 }
 
 // ===== SETTINGS =====
+// ===== ZOOM INTEGRATION =====
+async function loadZoomIntegration() {
+  const statusEl = document.getElementById('zoom-integration-status');
+  const btnEl = document.getElementById('zoom-integration-btn');
+  const cardEl = document.getElementById('zoom-integration-card');
+  if (!statusEl) return;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('user_integrations')
+      .select('metadata, created_at')
+      .eq('user_id', appState.userId)
+      .eq('provider', 'zoom')
+      .maybeSingle();
+
+    if (data) {
+      const email = data.metadata?.zoom_email || '';
+      statusEl.innerHTML = `<span style="color:#059669">✅ 連携済み</span>${email ? ' · ' + email : ''}`;
+      btnEl.textContent = '連携解除';
+      btnEl.onclick = disconnectZoom;
+      btnEl.style.background = '#FEE2E2';
+      btnEl.style.color = '#DC2626';
+      btnEl.style.border = '1px solid #FCA5A5';
+      cardEl.style.borderColor = '#A7F3D0';
+      cardEl.style.background = '#F0FDF4';
+    } else {
+      statusEl.textContent = '未連携';
+      btnEl.textContent = '連携する';
+      btnEl.onclick = connectZoom;
+      btnEl.style = '';
+      cardEl.style.borderColor = '';
+      cardEl.style.background = '#F8FAFC';
+    }
+  } catch(e) {
+    statusEl.textContent = '読み込みエラー';
+  }
+}
+
+async function connectZoom() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { alert('ログインが必要です'); return; }
+  window.location.href = `/api/auth/zoom/start?token=${session.access_token}`;
+}
+
+async function disconnectZoom() {
+  if (!confirm('Zoom連携を解除しますか？\n自動取り込みが停止されます。')) return;
+  const { error } = await supabaseClient
+    .from('user_integrations')
+    .delete()
+    .eq('user_id', appState.userId)
+    .eq('provider', 'zoom');
+  if (error) { alert('解除に失敗しました: ' + error.message); return; }
+  loadZoomIntegration();
+}
+
 async function saveSettings() {
   const name = document.getElementById('settings-name').value.trim();
   const al = document.getElementById('settings-alert');
