@@ -82,9 +82,11 @@ async function processTranscript(payload) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  console.log(`[zoom-webhook] transcript受信 host_id=${hostId} topic=${object.topic}`);
+
   // zoom_user_id から user_integration を引く
   const intRes = await fetch(
-    `${supabaseUrl}/rest/v1/user_integrations?provider=eq.zoom&metadata->>zoom_user_id=eq.${hostId}&select=*`,
+    `${supabaseUrl}/rest/v1/user_integrations?provider=eq.zoom&select=*`,
     {
       headers: {
         apikey: serviceKey,
@@ -92,9 +94,17 @@ async function processTranscript(payload) {
       },
     }
   );
-  const integrations = await intRes.json();
+  const allIntegrations = await intRes.json();
+  console.log(`[zoom-webhook] user_integrations件数=${allIntegrations?.length} host_id=${hostId}`);
+
+  // メモリ上でzoom_user_idを照合（JSONB queryの代替）
+  const integrations = (allIntegrations || []).filter(
+    i => i.metadata?.zoom_user_id === hostId
+  );
+
   if (!integrations?.length) {
-    console.log(`zoom_user_id=${hostId} のユーザーが見つかりません`);
+    console.log(`[zoom-webhook] zoom_user_id=${hostId} のユーザーが見つかりません`);
+    console.log(`[zoom-webhook] 登録済みzoom_user_ids: ${allIntegrations?.map(i => i.metadata?.zoom_user_id).join(', ')}`);
     return;
   }
 
@@ -120,8 +130,9 @@ async function processTranscript(payload) {
     (object.participant_video_files || []).map(p => p.user_name).filter(Boolean)
   )];
 
-  // meetings テーブルに upsert（external_id で重複防止）
-  await fetch(`${supabaseUrl}/rest/v1/meetings`, {
+  console.log(`[zoom-webhook] transcript有無=${!!transcriptFile} log文字数=${logText.length}`);
+
+  const saveRes = await fetch(`${supabaseUrl}/rest/v1/meetings`, {
     method: 'POST',
     headers: {
       apikey: serviceKey,
@@ -145,8 +156,12 @@ async function processTranscript(payload) {
       },
     }),
   });
-
-  console.log(`保存完了: ${object.topic} (${object.uuid})`);
+  if (!saveRes.ok) {
+    const errText = await saveRes.text();
+    console.error(`[zoom-webhook] meetings保存失敗 status=${saveRes.status} body=${errText}`);
+  } else {
+    console.log(`[zoom-webhook] 保存完了: ${object.topic} (${object.uuid})`);
+  }
 }
 
 module.exports = async function handler(req, res) {
