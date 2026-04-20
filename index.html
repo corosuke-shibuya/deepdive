@@ -1762,7 +1762,6 @@ function renderPersonsTab(record) {
     const canAnalyze = p.enough_data;
     const commType = stored.profile?.communication_type || null;
     const commIcon = stored.profile?.type_icon || '';
-    const safeId = domSafeId('person-profile', p.name);
     return `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
@@ -1781,14 +1780,14 @@ function renderPersonsTab(record) {
           ${hasProfile ? `<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent)" data-action="viewprofile" data-name="${escapeHtml(p.name)}">📋 詳細確認</button>` : ''}
         </div>
       </div>
-      <div id="${safeId}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
+      <div data-role="person-profile" data-name="${escapeHtml(p.name)}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
     </div>`;
   }).join('');
   el.querySelectorAll('[data-action="analyze"]').forEach(btn => {
     btn.addEventListener('click', () => analyzeParticipant(btn.dataset.name, btn.dataset.role, Number(btn.dataset.id)));
   });
   el.querySelectorAll('[data-action="viewprofile"]').forEach(btn => {
-    btn.addEventListener('click', () => viewPersonProfile(btn.dataset.name));
+    btn.addEventListener('click', () => viewPersonProfile(btn.dataset.name, btn.closest('.card')));
   });
 }
 
@@ -1811,7 +1810,10 @@ async function analyzeParticipant(name, role, meetingId) {
     await dbSavePerson(name, appState.persons[name]);
     hideLoading();
     renderPersonsTab(record);
-    viewPersonProfile(name);
+    const personCard = Array.from(document.querySelectorAll('#result-persons .card')).find(card => {
+      return card.querySelector('[data-role="person-profile"]')?.dataset.name === name;
+    });
+    viewPersonProfile(name, personCard);
     switchTab('persons', document.querySelector('.tab[data-tab="persons"]'));
   } catch(e) {
     hideLoading();
@@ -1819,12 +1821,15 @@ async function analyzeParticipant(name, role, meetingId) {
   }
 }
 
-function viewPersonProfile(name) {
+function viewPersonProfile(name, cardEl) {
   const person = appState.persons[name];
   if (!person || !person.profile) return;
   const p = person.profile;
-  const elId = domSafeId('person-profile', name);
-  const el = document.getElementById(elId);
+  const container = cardEl?.querySelector('[data-role="person-profile"]');
+  const el = container && container.dataset.name === name
+    ? container
+    : Array.from(document.querySelectorAll('#result-persons [data-role="person-profile"]'))
+        .find(node => node.dataset.name === name);
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
   el.style.display = 'block';
@@ -2819,8 +2824,7 @@ function escapeHtml(s) {
 }
 function domSafeId(prefix, value) {
   const normalized = String(value ?? '').normalize('NFKC');
-  let encoded = '';
-  for (const ch of normalized) encoded += ch.codePointAt(0).toString(16);
+  const encoded = Array.from(normalized, ch => ch.codePointAt(0).toString(16)).join('-');
   return `${prefix}-${encoded || 'empty'}`;
 }
 function scoreClass(s) { return s >= 70 ? 'color-good' : s >= 50 ? 'color-ok' : 'color-poor'; }
