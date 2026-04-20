@@ -436,6 +436,9 @@
     <div class="nav-item" data-page="prep">
       <span class="nav-icon">🎯</span> 会議準備
     </div>
+    <div class="nav-item" data-page="participants">
+      <span class="nav-icon">👥</span> 関係者
+    </div>
     <div class="nav-item" data-page="prep-history">
       <span class="nav-icon">📁</span> 準備履歴
     </div>
@@ -744,81 +747,66 @@
 
     <div id="prep-alert" class="alert alert-error"></div>
 
-    <div class="grid-2" style="margin-bottom:20px">
+    <div style="max-width:720px;margin-bottom:20px">
+      <div class="card">
+        <p class="card-title">📋 会議の基本情報</p>
 
-      <!-- 左：会議情報のみ -->
-      <div style="display:flex;flex-direction:column;gap:16px">
-        <div class="card">
-          <p class="card-title">📋 会議の基本情報</p>
-
-          <div class="form-group">
-            <label>この会議で達成したいこと <span style="color:var(--danger)">*</span></label>
-            <input type="text" id="prep-goal"
-              placeholder="例：来週の予算会議までに山田部長から増員の承認をもらう" />
-            <p class="input-hint">→ 「誰に」「何を」「いつまでに」を入れると戦略が具体的になります</p>
-          </div>
-
-          <div class="form-group">
-            <label>話したい内容・伝えたいポイント</label>
-            <textarea id="prep-agenda" style="min-height:110px"
-              placeholder="例：&#10;・現状：エンジニア2名が毎週20時間超の残業、品質リスクが高まっている&#10;・要望：2名増員（または外部委託）の承認&#10;・根拠：競合他社のリソース配分データと、このままの損失試算を提示する"></textarea>
-            <p class="input-hint">→ 伝えたい順番・強調したい根拠・代替案があれば書いておくと想定問答が精度UP</p>
-          </div>
-
-          <div class="form-group">
-            <label>想定される懸念・反論（任意）</label>
-            <textarea id="prep-concerns" style="min-height:90px"
-              placeholder="例：&#10;・「予算が足りない」と言われそう&#10;・「今期は採用を凍結している」と言われる可能性がある&#10;・「外部委託はセキュリティリスクがある」と突っ込まれるかも"></textarea>
-            <p class="input-hint">→ 先に書いておくと、そこへの切り返しや代替案も生成されます</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- 右：手動入力 + 分析済み参加者 + 追加済みプロフィール -->
-      <div style="display:flex;flex-direction:column;gap:16px">
-
-        <!-- 手動入力（右上） -->
-        <div class="card">
-          <p class="card-title">✏️ 初めて会う方・手動で登録する</p>
-          <div class="form-group" style="margin-bottom:8px">
-            <label>名前</label>
-            <input type="text" id="manual-name" placeholder="例：山田部長" />
-          </div>
-          <div class="form-group" style="margin-bottom:8px">
-            <label>役職・立場</label>
-            <input type="text" id="manual-role" placeholder="例：経営企画部長（予算承認権あり）" />
-          </div>
-          <div class="form-group">
-            <label>知っている特徴・注意点</label>
-            <textarea id="manual-traits" style="min-height:80px"
-              placeholder="例：&#10;・数字とエビデンスを重視する&#10;・感情論より論理で話す方が刺さる&#10;・急かすと拒否反応を示す傾向がある&#10;・部下の残業問題には敏感"></textarea>
-            <p class="input-hint">→ 知っているほど、より個人に合わせた戦略が生成されます</p>
-          </div>
-          <button class="btn btn-outline btn-sm" style="width:100%" onclick="addManualPerson()">
-            ＋ この参加者を追加する
-          </button>
+        <div class="form-group">
+          <label>この会議で達成したいこと <span style="color:var(--danger)">*</span></label>
+          <input type="text" id="prep-goal"
+            placeholder="例：来週の予算会議までに山田部長から増員の承認をもらう" />
+          <p class="input-hint">→ 「誰に」「何を」「いつまでに」を入れると戦略が具体的になります</p>
         </div>
 
-        <!-- 追加済み参加者プロフィール（分析済み選択 + 手動追加の一覧） -->
-        <div class="card">
-          <p class="card-title">👥 追加済み参加者プロフィール</p>
-          <p class="input-hint" style="margin-bottom:10px">「会議振り返り → 参加者分析」で登録済みの人物が選べます</p>
-          <div id="prep-person-list">
-            <p style="color:var(--muted);font-size:13px">まだ分析済みの人物がいません</p>
-          </div>
+        <div class="form-group">
+          <label>話したい内容・伝えたいポイント</label>
+          <textarea id="prep-agenda" style="min-height:110px"
+            placeholder="例：&#10;・現状：エンジニア2名が毎週20時間超の残業、品質リスクが高まっている&#10;・要望：2名増員（または外部委託）の承認&#10;・根拠：競合他社のリソース配分データと、このままの損失試算を提示する"></textarea>
+          <p class="input-hint">→ 伝えたい順番・強調したい根拠・代替案があれば書いておくと想定問答が精度UP</p>
         </div>
 
-        <!-- 非表示：JS用 -->
-        <div id="prep-selected-profiles" style="display:none"></div>
+        <div class="form-group">
+          <label>想定される懸念・反論（任意）</label>
+          <textarea id="prep-concerns" style="min-height:90px"
+            placeholder="例：&#10;・「予算が足りない」と言われそう&#10;・「今期は採用を凍結している」と言われる可能性がある&#10;・「外部委託はセキュリティリスクがある」と突っ込まれるかも"></textarea>
+          <p class="input-hint">→ 先に書いておくと、そこへの切り返しや代替案も生成されます</p>
+        </div>
+
+        <!-- 参加者ピッカー -->
+        <div class="form-group" style="margin-bottom:0">
+          <label>参加者（任意）</label>
+          <!-- 選択済みチップ -->
+          <div id="prep-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:0"></div>
+          <button type="button" class="btn btn-outline btn-sm" style="width:auto"
+            onclick="toggleParticipantPicker()" id="prep-picker-toggle">＋ 参加者を選択</button>
+          <!-- ドロップダウンリスト -->
+          <div id="participant-picker" style="display:none;margin-top:8px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff">
+            <div style="padding:8px 12px;border-bottom:1px solid var(--border)">
+              <input id="participant-search" type="text" placeholder="名前で絞り込み..."
+                style="width:100%;border:none;outline:none;font-size:13px;background:transparent"
+                oninput="filterParticipantPicker()" />
+            </div>
+            <div id="participant-picker-list" style="max-height:200px;overflow-y:auto;padding:4px 0"></div>
+            <div style="padding:8px 12px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">
+              <a href="#" onclick="navigate('participants');return false" style="color:var(--accent);text-decoration:none">
+                ＋ 関係者を登録・編集する →
+              </a>
+            </div>
+          </div>
+          <p class="input-hint" style="margin-top:8px">→ 参加者がいなくても会議の目的だけで準備できます</p>
+        </div>
       </div>
     </div>
+
+    <!-- 非表示：JS用 -->
+    <div id="prep-selected-profiles" style="display:none"></div>
 
     <div style="text-align:center;margin-bottom:32px">
       <button class="btn btn-primary" style="width:auto;padding:14px 48px;font-size:16px"
         onclick="runMeetingPrep()">
-        🎯 戦略を立案する
+        🎯 会議の準備をする
       </button>
-      <p style="font-size:12px;color:var(--muted);margin-top:10px">参加者がいなくても会議の目的だけで立案できます</p>
+      <p style="font-size:12px;color:var(--muted);margin-top:10px">参加者がいなくても会議の目的だけで準備できます</p>
     </div>
 
     <!-- Prep Results -->
@@ -990,6 +978,57 @@
       <p class="page-subtitle">過去の会議準備を振り返りましょう</p>
     </div>
     <div id="prep-history-list"></div>
+  </div>
+
+  <!-- PARTICIPANTS PAGE -->
+  <div id="page-participants" class="page" style="display:none">
+    <div class="page-header">
+      <h2 class="page-title">👥 関係者</h2>
+      <p class="page-subtitle">会議準備で使う参加者情報を登録・管理します</p>
+    </div>
+    <div id="participants-alert" class="alert alert-error"></div>
+
+    <!-- 追加フォーム -->
+    <div class="card" style="margin-bottom:20px;max-width:720px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <p class="card-title" style="margin:0">＋ 新しい関係者を追加</p>
+        <button class="btn btn-outline btn-sm" style="width:auto" onclick="toggleParticipantForm()">
+          <span id="participant-form-toggle-label">フォームを開く</span>
+        </button>
+      </div>
+      <div id="participant-form" style="display:none;margin-top:16px">
+        <div class="grid-2" style="gap:12px;margin-bottom:12px">
+          <div class="form-group" style="margin:0">
+            <label>ログ上の呼称 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="pform-log-name" placeholder="例：山田部長" />
+            <p class="input-hint">→ 会議ログ内で使われる名前</p>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>表示名（任意）</label>
+            <input type="text" id="pform-display-name" placeholder="例：山田 太郎" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>関係性 <span style="color:var(--danger)">*</span></label>
+          <select id="pform-relationship" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff">
+            <option value="">選択してください</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:16px">
+          <label>AIへの文脈メモ（任意）</label>
+          <textarea id="pform-context" style="min-height:80px"
+            placeholder="例：数字とエビデンスを重視する。感情論より論理で話す方が刺さる。"></textarea>
+          <p class="input-hint">→ 会議準備のAI戦略立案に活用されます</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" style="width:auto" onclick="saveParticipant()">追加する</button>
+          <button class="btn btn-outline btn-sm" style="width:auto" onclick="toggleParticipantForm()">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 一覧 -->
+    <div id="participants-list" style="max-width:720px"></div>
   </div>
 
   <!-- SETTINGS PAGE -->
@@ -1178,13 +1217,15 @@ let appState = {
   history: [],
   persons: {},
   currentResult: null,
-  prepSelected: [],
+  prepSelected: [],   // 選択中の participants ID 配列
   prepManual: [],
   myprofileCache: null,
   charts: {},
   hrRole: null,      // null | 'hr_general' | 'hr_admin'
   hrCache: null,     // キャッシュ済みHRダッシュボードデータ
-  tenantId: null     // 所属テナントID
+  tenantId: null,    // 所属テナントID
+  participants: [],          // participants テーブルのデータ
+  relationshipTypes: []      // relationship_types テーブルのデータ
 };
 
 // ===== INIT =====
@@ -1277,11 +1318,15 @@ async function loadUserData(user) {
     appState.history = await dbLoadHistory();
     appState.persons = await dbLoadPersons();
     appState.myprofileCache = await dbLoadMyProfile();
+    appState.relationshipTypes = await dbLoadRelationshipTypes();
+    appState.participants = await dbLoadParticipants();
   } catch(e) {
     console.error('DB load error:', e);
     appState.history = [];
     appState.persons = {};
     appState.myprofileCache = null;
+    appState.relationshipTypes = [];
+    appState.participants = [];
   }
 
   // HR役割チェック（サイレント失敗: HR権限がなければそのまま続行）
@@ -1307,6 +1352,8 @@ function clearState() {
   appState.myprofileCache = null;
   appState.prepSelected = [];
   appState.prepManual = [];
+  appState.participants = [];
+  appState.relationshipTypes = [];
   appState.hrRole = null;
   appState.hrCache = null;
   Object.values(appState.charts).forEach(c => c?.destroy?.());
@@ -1469,6 +1516,69 @@ async function dbDeletePrepHistory() {
   if (error) console.error('dbDeletePrepHistory error:', error);
 }
 
+// ===== PARTICIPANTS / RELATIONSHIP TYPES (Supabase) =====
+
+async function dbLoadRelationshipTypes() {
+  const { data, error } = await supabaseClient
+    .from('relationship_types')
+    .select('*')
+    .eq('is_active', true)
+    .order('sort_order');
+  if (error) throw error;
+  return data || [];
+}
+
+async function dbLoadParticipants() {
+  const { data, error } = await supabaseClient
+    .from('participants')
+    .select('*, relationship_types(id, code, label_ja)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function dbSaveParticipant({ logName, displayName, relationshipTypeId, contextNote }) {
+  const { data, error } = await supabaseClient
+    .from('participants')
+    .insert({
+      user_id: appState.userId,
+      log_name: logName,
+      display_name: displayName || null,
+      relationship_type_id: relationshipTypeId,
+      context_note: contextNote || null,
+      updated_at: new Date().toISOString()
+    })
+    .select('*, relationship_types(id, code, label_ja)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function dbUpdateParticipant(id, { logName, displayName, relationshipTypeId, contextNote }) {
+  const { data, error } = await supabaseClient
+    .from('participants')
+    .update({
+      log_name: logName,
+      display_name: displayName || null,
+      relationship_type_id: relationshipTypeId,
+      context_note: contextNote || null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select('*, relationship_types(id, code, label_ja)')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function dbDeleteParticipant(id) {
+  const { error } = await supabaseClient
+    .from('participants')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+}
+
 // ===== NAVIGATION =====
 function showAuth() {
   document.getElementById('page-auth').style.display = 'flex';
@@ -1504,6 +1614,7 @@ function navigate(page) {
   if (page === 'dashboard') renderDashboard();
   if (page === 'history') renderHistory();
   if (page === 'prep') renderPrepPage();
+  if (page === 'participants') renderParticipantsPage();
   if (page === 'prep-history') renderPrepHistory();
   if (page === 'myprofile') initMyProfile();
   if (page === 'hr-dashboard') initHRDashboard();
@@ -1874,95 +1985,89 @@ function viewPersonProfile(name, cardEl) {
 }
 
 function usePrepWithPerson(name) {
+  // 関係者ページから参加者を選択して会議準備へ
   navigate('prep');
-  setTimeout(() => togglePrepPerson(name), 100);
 }
 
 // ===== MEETING PREP PAGE =====
 function renderPrepPage() {
-  const el = document.getElementById('prep-person-list');
-  // 自分自身（当事者）は除外する
-  const persons = Object.values(appState.persons).filter(p => p.profile && p.name !== appState.myName);
-  if (!persons.length) {
-    el.innerHTML = '<p style="color:var(--muted);font-size:13px">まだ参加者プロフィールがありません。<br>会議振り返り → 参加者分析タブから登録できます。</p>';
-    appState.prepSelected = [];
-    renderPrepSelected();
-    return;
-  }
-  el.innerHTML = persons.map(p => {
-    const isSelected = appState.prepSelected.includes(p.name);
-    const safeId = domSafeId('prep-chk', p.name);
-    return `
-    <div class="checklist-item" style="cursor:pointer;padding:10px 8px;border-radius:8px;${isSelected?'background:var(--accent-light);':''}" data-action="toggle-prep-person" data-name="${escapeHtml(p.name)}">
-      <div class="checklist-check ${isSelected?'checked':''}" id="${safeId}"></div>
-      <div>
-        <div style="font-weight:600;font-size:14px">${escapeHtml(p.name)}</div>
-        <div style="font-size:12px;color:var(--muted)">${escapeHtml(p.role || '役割不明')} &nbsp;·&nbsp; ${p.meetingIds.length}回分析済み</div>
-      </div>
-    </div>`;
-  }).join('');
-  el.querySelectorAll('[data-action="toggle-prep-person"]').forEach(div => {
-    div.addEventListener('click', () => togglePrepPerson(div.dataset.name));
-  });
-  renderPrepSelected();
+  renderPrepChips();
+  // ピッカーが開いていれば内容を更新
+  const picker = document.getElementById('participant-picker');
+  if (picker && picker.style.display !== 'none') renderParticipantPickerList();
 }
 
-function togglePrepPerson(name) {
-  const idx = appState.prepSelected.indexOf(name);
-  if (idx >= 0) appState.prepSelected.splice(idx, 1);
-  else appState.prepSelected.push(name);
-  renderPrepPage();
-}
-
-function addManualPerson() {
-  const name = document.getElementById('manual-name').value.trim();
-  const role = document.getElementById('manual-role').value.trim();
-  const traits = document.getElementById('manual-traits').value.trim();
-  if (!name) { alert('名前を入力してください'); return; }
-  if (appState.prepManual.find(p => p.name === name)) { alert('同じ名前の参加者がすでにいます'); return; }
-  appState.prepManual.push({ name, role, traits });
-  savePrepManual();
-  document.getElementById('manual-name').value = '';
-  document.getElementById('manual-role').value = '';
-  document.getElementById('manual-traits').value = '';
-  renderPrepSelected();
-}
-
-function removeManualPerson(name) {
-  appState.prepManual = appState.prepManual.filter(p => p.name !== name);
-  savePrepManual();
-  renderPrepSelected();
-}
-
-function renderPrepSelected() {
-  const el = document.getElementById('prep-selected-profiles');
+function renderPrepChips() {
+  const el = document.getElementById('prep-chips');
   if (!el) return;
-  const fromAnalysis = appState.prepSelected.map(n => appState.persons[n]).filter(Boolean);
-  const manual = appState.prepManual;
-  const all = [...fromAnalysis, ...manual];
-  if (!all.length) {
-    el.innerHTML = '';
+  if (!appState.prepSelected.length) { el.innerHTML = ''; return; }
+  el.innerHTML = appState.prepSelected.map(id => {
+    const p = appState.participants.find(x => x.id === id);
+    if (!p) return '';
+    const label = p.display_name || p.log_name;
+    return `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--accent-light);color:var(--accent);border:1px solid #BFDBFE;border-radius:20px;padding:4px 10px;font-size:13px;font-weight:600">
+      ${escapeHtml(label)}
+      <button onclick="togglePrepParticipant('${id}')" style="background:none;border:none;cursor:pointer;color:var(--accent);font-size:14px;line-height:1;padding:0 0 0 2px">✕</button>
+    </span>`;
+  }).join('');
+}
+
+function toggleParticipantPicker() {
+  const picker = document.getElementById('participant-picker');
+  if (!picker) return;
+  const open = picker.style.display !== 'none';
+  if (open) {
+    picker.style.display = 'none';
+    document.getElementById('prep-picker-toggle').textContent = '＋ 参加者を選択';
+  } else {
+    picker.style.display = 'block';
+    document.getElementById('prep-picker-toggle').textContent = '▲ 閉じる';
+    document.getElementById('participant-search').value = '';
+    renderParticipantPickerList();
+    document.getElementById('participant-search').focus();
+  }
+}
+
+function renderParticipantPickerList(filter = '') {
+  const el = document.getElementById('participant-picker-list');
+  if (!el) return;
+  const list = appState.participants.filter(p =>
+    !filter || p.log_name.includes(filter) || (p.display_name || '').includes(filter)
+  );
+  if (!list.length) {
+    el.innerHTML = '<p style="padding:12px 16px;color:var(--muted);font-size:13px">登録済みの関係者がいません</p>';
     return;
   }
-  el.innerHTML = all.map(p => {
-    const isManual = !p.profile && !p.meetingIds;
-    const summary = p.profile?.summary || p.traits || '（情報なし）';
-    return `
-    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div style="font-weight:700;margin-bottom:6px">
-          👤 ${escapeHtml(p.name)}
-          <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">${escapeHtml(p.role||'')}</span>
-          ${isManual ? '<span style="font-size:10px;background:#FEF3C7;color:#92400E;padding:2px 6px;border-radius:4px;margin-left:6px">手動入力</span>' : ''}
-        </div>
-        ${isManual ? `<button data-action="remove-manual" data-name="${escapeHtml(p.name)}" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>` : ''}
+  el.innerHTML = list.map(p => {
+    const selected = appState.prepSelected.includes(p.id);
+    const label = p.display_name || p.log_name;
+    const relLabel = p.relationship_types?.label_ja || '';
+    return `<div onclick="togglePrepParticipant('${p.id}')"
+      style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .15s;${selected ? 'background:var(--accent-light)' : ''}"
+      onmouseover="this.style.background='${selected ? 'var(--accent-light)' : '#F8FAFC'}'"
+      onmouseout="this.style.background='${selected ? 'var(--accent-light)' : 'transparent'}'">
+      <div style="width:18px;height:18px;border-radius:4px;border:2px solid ${selected ? 'var(--accent)' : 'var(--border)'};background:${selected ? 'var(--accent)' : '#fff'};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${selected ? '<span style="color:#fff;font-size:11px;line-height:1">✓</span>' : ''}
       </div>
-      <div style="font-size:13px;color:var(--muted);line-height:1.6">${escapeHtml(summary)}</div>
+      <div>
+        <div style="font-weight:600;font-size:14px">${escapeHtml(label)}</div>
+        <div style="font-size:12px;color:var(--muted)">${escapeHtml(relLabel)}</div>
+      </div>
     </div>`;
   }).join('');
-  el.querySelectorAll('[data-action="remove-manual"]').forEach(btn => {
-    btn.addEventListener('click', () => removeManualPerson(btn.dataset.name));
-  });
+}
+
+function filterParticipantPicker() {
+  const val = document.getElementById('participant-search').value.trim();
+  renderParticipantPickerList(val);
+}
+
+function togglePrepParticipant(id) {
+  const idx = appState.prepSelected.indexOf(id);
+  if (idx >= 0) appState.prepSelected.splice(idx, 1);
+  else appState.prepSelected.push(id);
+  renderPrepChips();
+  renderParticipantPickerList(document.getElementById('participant-search')?.value || '');
 }
 
 async function runMeetingPrep() {
@@ -1974,17 +2079,16 @@ async function runMeetingPrep() {
   hideAlert(al);
   showLoading();
   document.getElementById('loading-step').textContent = 'コミュニケーション戦略を立案中...';
-  const profiles = [
-    ...appState.prepSelected.map(n => {
-      const p = appState.persons[n];
-      return { name: p.name, role: p.role, ...p.profile };
-    }),
-    ...appState.prepManual.map(p => ({
-      name: p.name, role: p.role,
-      communication_style: p.traits || '（特徴なし）',
+  const profiles = appState.prepSelected.map(id => {
+    const p = appState.participants.find(x => x.id === id);
+    if (!p) return null;
+    return {
+      name: p.log_name,
+      role: p.relationship_types?.label_ja || '',
+      communication_style: p.context_note || '（特徴なし）',
       effective_approach: ''
-    }))
-  ];
+    };
+  }).filter(Boolean);
   try {
     const res = await fetch('/api/meeting-prep', {
       method: 'POST',
@@ -2326,6 +2430,8 @@ async function clearAllData() {
     appState.myprofileCache = null;
     appState.prepManual = [];
     appState.prepSelected = [];
+    appState.participants = [];
+    appState.relationshipTypes = [];
     hideLoading();
     navigate('dashboard');
     alert('✅ データを削除しました');
@@ -2434,6 +2540,163 @@ function renderMyProfile(d) {
   document.getElementById('myprofile-nextfocus').textContent = d.next_focus || '';
   const atEl = document.getElementById('myprofile-generated-at');
   atEl.textContent = d.generatedAt ? `最終生成: ${d.generatedAt}（${d.sessionCount || 0}回分の分析をもとに作成）` : '';
+}
+
+// ===== PARTICIPANTS PAGE =====
+
+function renderParticipantsPage() {
+  populateRelationshipSelect('pform-relationship');
+  renderParticipantsList();
+}
+
+function populateRelationshipSelect(selectId) {
+  const sel = document.getElementById(selectId);
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">選択してください</option>' +
+    appState.relationshipTypes.map(rt =>
+      `<option value="${rt.id}" ${rt.id === current ? 'selected' : ''}>${escapeHtml(rt.label_ja)}</option>`
+    ).join('');
+}
+
+function renderParticipantsList() {
+  const el = document.getElementById('participants-list');
+  if (!el) return;
+  if (!appState.participants.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">👥</div><p>まだ関係者が登録されていません</p><br>
+      <button class="btn btn-primary" style="width:auto" onclick="toggleParticipantForm()">＋ 最初の関係者を追加する</button></div>`;
+    return;
+  }
+  el.innerHTML = appState.participants.map(p => {
+    const label = p.display_name ? `${p.log_name}（${p.display_name}）` : p.log_name;
+    const relLabel = p.relationship_types?.label_ja || '—';
+    return `
+    <div class="card" style="margin-bottom:12px;max-width:720px" id="pcard-${p.id}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-weight:700;font-size:15px">${escapeHtml(label)}</span>
+            <span style="font-size:11px;background:var(--accent-light);color:var(--accent);border:1px solid #BFDBFE;padding:2px 8px;border-radius:12px;white-space:nowrap">${escapeHtml(relLabel)}</span>
+          </div>
+          ${p.context_note ? `<p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0;white-space:pre-wrap">${escapeHtml(p.context_note)}</p>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-outline btn-sm" style="width:auto" onclick="openEditParticipant('${p.id}')">編集</button>
+          <button class="btn btn-sm" style="width:auto;background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5" onclick="deleteParticipant('${p.id}')">削除</button>
+        </div>
+      </div>
+      <!-- インライン編集フォーム（初期非表示） -->
+      <div id="pedit-${p.id}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div class="grid-2" style="gap:12px;margin-bottom:12px">
+          <div class="form-group" style="margin:0">
+            <label>ログ上の呼称 <span style="color:var(--danger)">*</span></label>
+            <input type="text" id="pedit-log-${p.id}" value="${escapeHtml(p.log_name)}" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>表示名（任意）</label>
+            <input type="text" id="pedit-display-${p.id}" value="${escapeHtml(p.display_name || '')}" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>関係性</label>
+          <select id="pedit-rel-${p.id}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff">
+            ${appState.relationshipTypes.map(rt =>
+              `<option value="${rt.id}" ${rt.id === p.relationship_type_id ? 'selected' : ''}>${escapeHtml(rt.label_ja)}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>AIへの文脈メモ（任意）</label>
+          <textarea id="pedit-ctx-${p.id}" style="min-height:70px">${escapeHtml(p.context_note || '')}</textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" style="width:auto" onclick="updateParticipant('${p.id}')">保存</button>
+          <button class="btn btn-outline btn-sm" style="width:auto" onclick="closeEditParticipant('${p.id}')">キャンセル</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleParticipantForm() {
+  const form = document.getElementById('participant-form');
+  const label = document.getElementById('participant-form-toggle-label');
+  if (!form) return;
+  const open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : 'block';
+  label.textContent = open ? 'フォームを開く' : '閉じる';
+  if (!open) {
+    document.getElementById('pform-log-name').value = '';
+    document.getElementById('pform-display-name').value = '';
+    document.getElementById('pform-context').value = '';
+    populateRelationshipSelect('pform-relationship');
+    document.getElementById('pform-log-name').focus();
+  }
+}
+
+async function saveParticipant() {
+  const logName = document.getElementById('pform-log-name').value.trim();
+  const displayName = document.getElementById('pform-display-name').value.trim();
+  const relationshipTypeId = document.getElementById('pform-relationship').value;
+  const contextNote = document.getElementById('pform-context').value.trim();
+  const al = document.getElementById('participants-alert');
+
+  if (!logName) { showAlert(al, 'ログ上の呼称を入力してください'); return; }
+  if (!relationshipTypeId) { showAlert(al, '関係性を選択してください'); return; }
+  hideAlert(al);
+
+  try {
+    const created = await dbSaveParticipant({ logName, displayName, relationshipTypeId, contextNote });
+    appState.participants.unshift(created);
+    toggleParticipantForm();
+    renderParticipantsList();
+  } catch(e) {
+    showAlert(al, e.message.includes('unique') ? 'その呼称はすでに登録済みです' : '保存に失敗しました: ' + e.message);
+  }
+}
+
+function openEditParticipant(id) {
+  document.querySelectorAll('[id^="pedit-"]').forEach(el => { el.style.display = 'none'; });
+  const form = document.getElementById(`pedit-${id}`);
+  if (form) form.style.display = 'block';
+}
+
+function closeEditParticipant(id) {
+  const form = document.getElementById(`pedit-${id}`);
+  if (form) form.style.display = 'none';
+}
+
+async function updateParticipant(id) {
+  const logName = document.getElementById(`pedit-log-${id}`).value.trim();
+  const displayName = document.getElementById(`pedit-display-${id}`).value.trim();
+  const relationshipTypeId = document.getElementById(`pedit-rel-${id}`).value;
+  const contextNote = document.getElementById(`pedit-ctx-${id}`).value.trim();
+  const al = document.getElementById('participants-alert');
+
+  if (!logName) { showAlert(al, 'ログ上の呼称を入力してください'); return; }
+  hideAlert(al);
+
+  try {
+    const updated = await dbUpdateParticipant(id, { logName, displayName, relationshipTypeId, contextNote });
+    const idx = appState.participants.findIndex(p => p.id === id);
+    if (idx >= 0) appState.participants[idx] = updated;
+    renderParticipantsList();
+  } catch(e) {
+    showAlert(al, '更新に失敗しました: ' + e.message);
+  }
+}
+
+async function deleteParticipant(id) {
+  if (!confirm('この関係者を削除しますか？')) return;
+  const al = document.getElementById('participants-alert');
+  try {
+    await dbDeleteParticipant(id);
+    appState.participants = appState.participants.filter(p => p.id !== id);
+    appState.prepSelected = appState.prepSelected.filter(x => x !== id);
+    renderParticipantsList();
+  } catch(e) {
+    showAlert(al, '削除に失敗しました: ' + e.message);
+  }
 }
 
 // ===== HR DASHBOARD =====
