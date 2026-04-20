@@ -1762,7 +1762,7 @@ function renderPersonsTab(record) {
     const canAnalyze = p.enough_data;
     const commType = stored.profile?.communication_type || null;
     const commIcon = stored.profile?.type_icon || '';
-    const safeId = p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeId = domSafeId('person-profile', p.name);
     return `
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
@@ -1781,7 +1781,7 @@ function renderPersonsTab(record) {
           ${hasProfile ? `<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent)" data-action="viewprofile" data-name="${escapeHtml(p.name)}">📋 詳細確認</button>` : ''}
         </div>
       </div>
-      <div id="person-profile-${safeId}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
+      <div id="${safeId}" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"></div>
     </div>`;
   }).join('');
   el.querySelectorAll('[data-action="analyze"]').forEach(btn => {
@@ -1823,8 +1823,7 @@ function viewPersonProfile(name) {
   const person = appState.persons[name];
   if (!person || !person.profile) return;
   const p = person.profile;
-  const safeId = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const elId = `person-profile-${safeId}`;
+  const elId = domSafeId('person-profile', name);
   const el = document.getElementById(elId);
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
@@ -1887,10 +1886,10 @@ function renderPrepPage() {
   }
   el.innerHTML = persons.map(p => {
     const isSelected = appState.prepSelected.includes(p.name);
-    const safeId = p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeId = domSafeId('prep-chk', p.name);
     return `
     <div class="checklist-item" style="cursor:pointer;padding:10px 8px;border-radius:8px;${isSelected?'background:var(--accent-light);':''}" data-action="toggle-prep-person" data-name="${escapeHtml(p.name)}">
-      <div class="checklist-check ${isSelected?'checked':''}" id="prep-chk-${safeId}"></div>
+      <div class="checklist-check ${isSelected?'checked':''}" id="${safeId}"></div>
       <div>
         <div style="font-weight:600;font-size:14px">${escapeHtml(p.name)}</div>
         <div style="font-size:12px;color:var(--muted)">${escapeHtml(p.role || '役割不明')} &nbsp;·&nbsp; ${p.meetingIds.length}回分析済み</div>
@@ -2817,6 +2816,12 @@ function renderHRSkillBars(skills) {
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function domSafeId(prefix, value) {
+  const normalized = String(value ?? '').normalize('NFKC');
+  let encoded = '';
+  for (const ch of normalized) encoded += ch.codePointAt(0).toString(16);
+  return `${prefix}-${encoded || 'empty'}`;
 }
 function scoreClass(s) { return s >= 70 ? 'color-good' : s >= 50 ? 'color-ok' : 'color-poor'; }
 function scoreColor(s) { return s >= 70 ? '#059669' : s >= 50 ? '#D97706' : '#DC2626'; }
