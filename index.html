@@ -1239,7 +1239,8 @@ let appState = {
   hrCache: null,     // キャッシュ済みHRダッシュボードデータ
   tenantId: null,    // 所属テナントID
   participants: [],          // participants テーブルのデータ
-  relationshipTypes: []      // relationship_types テーブルのデータ
+  relationshipTypes: [],     // relationship_types テーブルのデータ
+  autoRelationshipTypeId: null
 };
 
 // ===== INIT =====
@@ -1334,6 +1335,7 @@ async function loadUserData(user) {
     appState.myprofileCache = await dbLoadMyProfile();
     appState.relationshipTypes = await dbLoadRelationshipTypes();
     appState.participants = await dbLoadParticipants();
+    await syncDetectedPersonsToParticipants();
   } catch(e) {
     console.error('DB load error:', e);
     appState.history = [];
@@ -1368,6 +1370,7 @@ function clearState() {
   appState.prepManual = [];
   appState.participants = [];
   appState.relationshipTypes = [];
+  appState.autoRelationshipTypeId = null;
   appState.hrRole = null;
   appState.hrCache = null;
   Object.values(appState.charts).forEach(c => c?.destroy?.());
@@ -1542,6 +1545,23 @@ async function dbLoadRelationshipTypes() {
   return data || [];
 }
 
+async function dbCreateRelationshipType({ code, labelJa, sortOrder = 999 }) {
+  const { data, error } = await supabaseClient
+    .from('relationship_types')
+    .insert({
+      code,
+      label_ja: labelJa,
+      sort_order: sortOrder,
+      is_active: true,
+      user_id: appState.userId,
+      updated_at: new Date().toISOString()
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function dbLoadParticipants() {
   const { data, error } = await supabaseClient
     .from('participants')
@@ -1591,6 +1611,100 @@ async function dbDeleteParticipant(id) {
     .delete()
     .eq('id', id);
   if (error) throw error;
+}
+
+function normalizeName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getParticipantLabel(participant) {
+  return participant?.display_name ? `${participant.log_name}（${participant.display_name}）` : (participant?.log_name || '');
+}
+
+function findParticipantByName(name) {
+  const normalized = normalizeName(name);
+  if (!normalized) return null;
+  return appState.participants.find(p =>
+    normalizeName(p.log_name) === normalized || normalizeName(p.display_name) === normalized
+  ) || null;
+}
+
+function getAutoRelationshipTypeCode() {
+  return `auto_unassigned_${appState.userId}`;
+}
+
+async function ensureAutoRelationshipType() {
+  if (appState.autoRelationshipTypeId) return appState.autoRelationshipTypeId;
+  const code = getAutoRelationshipTypeCode();
+  const existing = appState.relationshipTypes.find(rt => rt.code === code);
+  if (existing) {
+    appState.autoRelationshipTypeId = existing.id;
+    return existing.id;
+  }
+  let created;
+  try {
+    created = await dbCreateRelationshipType({ code, labelJa: '未設定', sortOrder: 999 });
+  } catch (e) {
+    if (!String(e.message || '').includes('duplicate')) throw e;
+    appState.relationshipTypes = await dbLoadRelationshipTypes();
+    created = appState.relationshipTypes.find(rt => rt.code === code);
+    if (!created) throw e;
+  }
+  if (!appState.relationshipTypes.some(rt => rt.id === created.id)) {
+    appState.relationshipTypes.push(created);
+    appState.relationshipTypes.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  }
+  appState.autoRelationshipTypeId = created.id;
+  return created.id;
+}
+
+function getParticipantLinkedPersonNames(participant) {
+  return [...new Set([participant?.log_name, participant?.display_name].filter(Boolean))];
+}
+
+function getParticipantPersonBundle(participant) {
+  if (!participant) return null;
+  const linkedNames = getParticipantLinkedPersonNames(participant);
+  const linkedRecords = linkedNames
+    .map(name => ({ name, record: appState.persons[name] }))
+    .filter(entry => entry.record);
+  const meetingIds = [...new Set(linkedRecords.flatMap(entry => entry.record.meetingIds || []))];
+  const profileEntry = linkedRecords.find(entry => entry.record.profile) || null;
+  const analysisEntry = linkedRecords.find(entry => entry.record.enough_data) || linkedRecords[0] || null;
+  return {
+    names: linkedNames,
+    records: linkedRecords,
+    meetingIds,
+    meetingCount: meetingIds.length,
+    profile: profileEntry?.record?.profile || null,
+    enoughData: linkedRecords.some(entry => entry.record.enough_data),
+    latestMeetingId: meetingIds.length ? [...meetingIds].sort((a, b) => Number(b) - Number(a))[0] : null,
+    analysisName: analysisEntry?.name || participant.log_name
+  };
+}
+
+async function syncDetectedPersonsToParticipants() {
+  const detectedNames = Object.keys(appState.persons || {}).filter(name => {
+    const normalized = normalizeName(name);
+    return normalized && normalized !== normalizeName(appState.myName);
+  });
+  if (!detectedNames.length) return;
+
+  for (const name of detectedNames) {
+    if (findParticipantByName(name)) continue;
+    const relationshipTypeId = await ensureAutoRelationshipType();
+    try {
+      const created = await dbSaveParticipant({
+        logName: name,
+        displayName: '',
+        relationshipTypeId,
+        contextNote: ''
+      });
+      appState.participants.unshift(created);
+    } catch (e) {
+      if (!String(e.message || '').includes('unique')) throw e;
+    }
+  }
 }
 
 // ===== NAVIGATION =====
@@ -1704,6 +1818,7 @@ async function runAnalysis() {
         appState.persons[p.name].enough_data = p.enough_data;
         await dbSavePerson(p.name, appState.persons[p.name]);
       }
+      await syncDetectedPersonsToParticipants();
     }
 
     appState.currentResult = record;
@@ -1958,7 +2073,17 @@ function viewPersonProfile(name, cardEl) {
   if (!el) return;
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
   el.style.display = 'block';
-  el.innerHTML = `
+  el.innerHTML = buildProfileDetailHtml(p, `
+    <div style="margin-top:12px;text-align:right">
+      <button class="btn btn-outline btn-sm" data-action="prep-with-person" data-name="${escapeHtml(name)}">🎯 この人で会議準備する</button>
+    </div>`);
+  const prepBtn = el.querySelector('[data-action="prep-with-person"]');
+  if (prepBtn) prepBtn.addEventListener('click', () => usePrepWithPerson(prepBtn.dataset.name));
+}
+
+function buildProfileDetailHtml(profile, footerHtml = '') {
+  const p = profile || {};
+  return `
     ${p.communication_type ? `
     <div style="display:flex;align-items:center;gap:10px;background:var(--accent-light);border-radius:10px;padding:12px 16px;margin-bottom:12px">
       <span style="font-size:28px">${escapeHtml(p.type_icon || '')}</span>
@@ -1980,22 +2105,18 @@ function viewPersonProfile(name, cardEl) {
     <div class="grid-2" style="gap:12px;margin-bottom:12px">
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--success);margin-bottom:6px">✅ 刺さる言葉・フレーズ</div>
-        ${(p.phrases_that_work||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('')}
+        ${(p.phrases_that_work||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('') || '<div style="font-size:13px;color:var(--muted)">—</div>'}
       </div>
       <div>
         <div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:6px">🚫 避けるべき言葉</div>
-        ${(p.phrases_to_avoid||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('')}
+        ${(p.phrases_to_avoid||[]).map(ph => `<div style="font-size:13px;padding:4px 0;border-bottom:1px solid var(--border)">・${escapeHtml(ph)}</div>`).join('') || '<div style="font-size:13px;color:var(--muted)">—</div>'}
       </div>
     </div>
     <div style="background:var(--accent-light);border-radius:8px;padding:12px">
       <div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:4px">📊 攻略ポイント</div>
       <div style="font-size:13px;line-height:1.6">${escapeHtml(p.summary || '—')}</div>
     </div>
-    <div style="margin-top:12px;text-align:right">
-      <button class="btn btn-outline btn-sm" data-action="prep-with-person" data-name="${escapeHtml(name)}">🎯 この人で会議準備する</button>
-    </div>`;
-  const prepBtn = el.querySelector('[data-action="prep-with-person"]');
-  if (prepBtn) prepBtn.addEventListener('click', () => usePrepWithPerson(prepBtn.dataset.name));
+    ${footerHtml}`;
 }
 
 function usePrepWithPerson(name) {
@@ -2607,9 +2728,13 @@ function renderParticipantsList() {
     return;
   }
   el.innerHTML = appState.participants.map(p => {
-    const label = p.display_name ? `${p.log_name}（${p.display_name}）` : p.log_name;
+    const label = getParticipantLabel(p);
     const relLabel = p.relationship_types?.label_ja || '—';
     const selected = appState.prepSelected.includes(p.id);
+    const bundle = getParticipantPersonBundle(p);
+    const hasProfile = !!bundle?.profile;
+    const canAnalyze = !!bundle?.enoughData && !!bundle?.latestMeetingId;
+    const meetingCount = bundle?.meetingCount || 0;
     return `
     <div class="card" style="margin-bottom:12px;max-width:720px;${selected ? 'border-color:#93C5FD;box-shadow:0 4px 14px rgba(37,99,235,.08)' : ''}" id="pcard-${p.id}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
@@ -2619,12 +2744,35 @@ function renderParticipantsList() {
             <span style="font-size:11px;background:var(--accent-light);color:var(--accent);border:1px solid #BFDBFE;padding:2px 8px;border-radius:12px;white-space:nowrap">${escapeHtml(relLabel)}</span>
             ${selected ? '<span style="font-size:11px;background:#ECFDF5;color:var(--success);border:1px solid #A7F3D0;padding:2px 8px;border-radius:12px;white-space:nowrap">会議準備に選択中</span>' : ''}
           </div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">
+            ${meetingCount ? `登場会議: ${meetingCount}回` : 'まだ会議分析での登場履歴はありません'}
+          </div>
           ${p.context_note ? `<p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0;white-space:pre-wrap">${escapeHtml(p.context_note)}</p>` : ''}
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
+        <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn btn-primary btn-sm" style="width:auto" onclick="startPrepForParticipant('${p.id}')">この人で準備する</button>
+          ${canAnalyze ? `<button class="btn btn-outline btn-sm" style="width:auto" onclick="analyzeParticipantForStakeholder('${p.id}')">${hasProfile ? '🔄 再分析' : '🔍 参加者分析'}</button>` : ''}
+          ${hasProfile ? `<button class="btn btn-outline btn-sm" style="width:auto" onclick="toggleParticipantProfile('${p.id}')">📋 詳細確認</button>` : ''}
+          ${appState.participants.length > 1 ? `<button class="btn btn-outline btn-sm" style="width:auto" onclick="openMergeParticipant('${p.id}')">🔗 統合する</button>` : ''}
           <button class="btn btn-outline btn-sm" style="width:auto" onclick="openEditParticipant('${p.id}')">編集</button>
           <button class="btn btn-sm" style="width:auto;background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5" onclick="deleteParticipant('${p.id}')">削除</button>
+        </div>
+      </div>
+      <div id="pprofile-${p.id}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)"></div>
+      <div id="pmerge-${p.id}" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:700;margin-bottom:6px">別名として統合する</div>
+        <p style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:10px">
+          この関係者を別の関係者にまとめます。残す側のログ名と表示名が優先されます。
+        </p>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="pmerge-target-${p.id}" style="max-width:320px">
+            <option value="">統合先を選択してください</option>
+            ${appState.participants.filter(other => other.id !== p.id).map(other =>
+              `<option value="${other.id}">${escapeHtml(getParticipantLabel(other))}</option>`
+            ).join('')}
+          </select>
+          <button class="btn btn-primary btn-sm" style="width:auto" onclick="mergeParticipantInto('${p.id}')">統合する</button>
+          <button class="btn btn-outline btn-sm" style="width:auto" onclick="closeMergeParticipant('${p.id}')">キャンセル</button>
         </div>
       </div>
       <!-- インライン編集フォーム（初期非表示） -->
@@ -2703,7 +2851,7 @@ async function saveParticipant() {
 }
 
 function openEditParticipant(id) {
-  document.querySelectorAll('[id^="pedit-"]').forEach(el => { el.style.display = 'none'; });
+  document.querySelectorAll('[id^="pedit-"],[id^="pmerge-"]').forEach(el => { el.style.display = 'none'; });
   const form = document.getElementById(`pedit-${id}`);
   if (form) form.style.display = 'block';
 }
@@ -2711,6 +2859,83 @@ function openEditParticipant(id) {
 function closeEditParticipant(id) {
   const form = document.getElementById(`pedit-${id}`);
   if (form) form.style.display = 'none';
+}
+
+function toggleParticipantProfile(id) {
+  const participant = appState.participants.find(p => p.id === id);
+  const bundle = getParticipantPersonBundle(participant);
+  const el = document.getElementById(`pprofile-${id}`);
+  if (!participant || !bundle?.profile || !el) return;
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = buildProfileDetailHtml(bundle.profile, `
+    <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="font-size:12px;color:var(--muted)">
+        参照中の呼称: ${escapeHtml(bundle.names.join(' / '))}
+      </div>
+      <button class="btn btn-outline btn-sm" style="width:auto" onclick="startPrepForParticipant('${id}')">🎯 この人で会議準備する</button>
+    </div>`);
+}
+
+async function analyzeParticipantForStakeholder(id) {
+  const participant = appState.participants.find(p => p.id === id);
+  const bundle = getParticipantPersonBundle(participant);
+  if (!participant || !bundle?.latestMeetingId) return;
+  await analyzeParticipant(bundle.analysisName, participant.relationship_types?.label_ja || '', Number(bundle.latestMeetingId));
+  navigate('participants');
+  renderParticipantsPage();
+  toggleParticipantProfile(id);
+}
+
+function openMergeParticipant(id) {
+  document.querySelectorAll('[id^="pedit-"],[id^="pmerge-"]').forEach(el => { el.style.display = 'none'; });
+  const form = document.getElementById(`pmerge-${id}`);
+  if (form) form.style.display = 'block';
+}
+
+function closeMergeParticipant(id) {
+  const form = document.getElementById(`pmerge-${id}`);
+  if (form) form.style.display = 'none';
+}
+
+async function mergeParticipantInto(sourceId) {
+  const source = appState.participants.find(p => p.id === sourceId);
+  const targetId = document.getElementById(`pmerge-target-${sourceId}`)?.value;
+  const target = appState.participants.find(p => p.id === targetId);
+  const al = document.getElementById('participants-alert');
+  if (!source || !target) {
+    showAlert(al, '統合先を選択してください');
+    return;
+  }
+  if (!confirm(`「${getParticipantLabel(source)}」を「${getParticipantLabel(target)}」に統合しますか？`)) return;
+
+  const mergedDisplayName = target.display_name || source.display_name || (source.log_name !== target.log_name ? source.log_name : '');
+  const mergedContext = [target.context_note, source.context_note].filter(Boolean).join('\n');
+
+  try {
+    const updated = await dbUpdateParticipant(target.id, {
+      logName: target.log_name,
+      displayName: mergedDisplayName,
+      relationshipTypeId: target.relationship_type_id,
+      contextNote: mergedContext
+    });
+    await dbDeleteParticipant(source.id);
+    appState.participants = appState.participants
+      .filter(p => p.id !== source.id)
+      .map(p => p.id === target.id ? updated : p);
+    appState.prepSelected = appState.prepSelected
+      .filter(id => id !== source.id)
+      .map(id => id === target.id ? target.id : id);
+    renderParticipantsPage();
+    renderPrepPage();
+    al.textContent = `✅ 「${getParticipantLabel(source)}」を「${getParticipantLabel(updated)}」に統合しました。`;
+    al.className = 'alert alert-success show';
+  } catch(e) {
+    showAlert(al, '統合に失敗しました: ' + e.message);
+  }
 }
 
 async function updateParticipant(id) {
