@@ -990,13 +990,16 @@
 
     <!-- 追加フォーム -->
     <div class="card" style="margin-bottom:20px;max-width:720px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <p class="card-title" style="margin:0">＋ 新しい関係者を追加</p>
-        <button class="btn btn-outline btn-sm" style="width:auto" onclick="toggleParticipantForm()">
-          <span id="participant-form-toggle-label">フォームを開く</span>
-        </button>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <p class="card-title" style="margin:0 0 4px">＋ 新しい関係者を追加</p>
+          <p style="font-size:13px;color:var(--muted);line-height:1.6">
+            先に関係者を登録しておくと、そのまま相手を選んで会議準備に進めます。
+          </p>
+        </div>
+        <span style="font-size:11px;background:var(--accent-light);color:var(--accent);border:1px solid #BFDBFE;padding:4px 10px;border-radius:999px;white-space:nowrap">いつでも追加できます</span>
       </div>
-      <div id="participant-form" style="display:none;margin-top:16px">
+      <div id="participant-form" style="display:block;margin-top:16px">
         <div class="grid-2" style="gap:12px;margin-bottom:12px">
           <div class="form-group" style="margin:0">
             <label>ログ上の呼称 <span style="color:var(--danger)">*</span></label>
@@ -1022,12 +1025,23 @@
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-primary btn-sm" style="width:auto" onclick="saveParticipant()">追加する</button>
-          <button class="btn btn-outline btn-sm" style="width:auto" onclick="toggleParticipantForm()">キャンセル</button>
+          <button class="btn btn-outline btn-sm" style="width:auto" onclick="resetParticipantForm()">入力をクリア</button>
         </div>
       </div>
     </div>
 
     <!-- 一覧 -->
+    <div class="card" style="margin-bottom:20px;max-width:720px;background:linear-gradient(135deg,#EFF6FF,#F8FAFC)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+        <div>
+          <p class="card-title" style="margin:0 0 6px">🎯 関係者を選んで会議準備へ</p>
+          <p style="font-size:13px;color:var(--muted);line-height:1.7">
+            登録済みの関係者は下の一覧からいつでも選択できます。相手を選ぶと会議準備ページに移動し、参加者が自動でセットされます。
+          </p>
+        </div>
+        <button class="btn btn-outline btn-sm" style="width:auto" onclick="navigate('prep')">関係者を選ばずに準備する</button>
+      </div>
+    </div>
     <div id="participants-list" style="max-width:720px"></div>
   </div>
 
@@ -1985,13 +1999,22 @@ function viewPersonProfile(name, cardEl) {
 }
 
 function usePrepWithPerson(name) {
-  // 関係者ページから参加者を選択して会議準備へ
-  navigate('prep');
+  const matched = appState.participants.find(p =>
+    p.log_name === name || p.display_name === name
+  );
+  if (matched) {
+    startPrepForParticipant(matched.id);
+    return;
+  }
+  navigate('participants');
+  const al = document.getElementById('participants-alert');
+  if (al) showAlert(al, `「${name}」は関係者一覧に未登録です。先に登録すると会議準備で選択できます。`);
 }
 
 // ===== MEETING PREP PAGE =====
 function renderPrepPage() {
   renderPrepChips();
+  updatePrepParticipantHint();
   // ピッカーが開いていれば内容を更新
   const picker = document.getElementById('participant-picker');
   if (picker && picker.style.display !== 'none') renderParticipantPickerList();
@@ -2018,7 +2041,7 @@ function toggleParticipantPicker() {
   const open = picker.style.display !== 'none';
   if (open) {
     picker.style.display = 'none';
-    document.getElementById('prep-picker-toggle').textContent = '＋ 参加者を選択';
+    updatePrepParticipantHint();
   } else {
     picker.style.display = 'block';
     document.getElementById('prep-picker-toggle').textContent = '▲ 閉じる';
@@ -2067,7 +2090,22 @@ function togglePrepParticipant(id) {
   if (idx >= 0) appState.prepSelected.splice(idx, 1);
   else appState.prepSelected.push(id);
   renderPrepChips();
+  updatePrepParticipantHint();
   renderParticipantPickerList(document.getElementById('participant-search')?.value || '');
+}
+
+function updatePrepParticipantHint() {
+  const hint = document.getElementById('prep-picker-toggle');
+  if (!hint) return;
+  if (!appState.prepSelected.length) {
+    hint.textContent = '＋ 参加者を選択';
+    return;
+  }
+  const names = appState.prepSelected
+    .map(id => appState.participants.find(x => x.id === id))
+    .filter(Boolean)
+    .map(p => p.display_name || p.log_name);
+  hint.textContent = `参加者を選択中: ${names.join(' / ')}`;
 }
 
 async function runMeetingPrep() {
@@ -2547,6 +2585,7 @@ function renderMyProfile(d) {
 function renderParticipantsPage() {
   populateRelationshipSelect('pform-relationship');
   renderParticipantsList();
+  updateParticipantsPageFocus();
 }
 
 function populateRelationshipSelect(selectId) {
@@ -2564,23 +2603,26 @@ function renderParticipantsList() {
   if (!el) return;
   if (!appState.participants.length) {
     el.innerHTML = `<div class="empty-state"><div class="icon">👥</div><p>まだ関係者が登録されていません</p><br>
-      <button class="btn btn-primary" style="width:auto" onclick="toggleParticipantForm()">＋ 最初の関係者を追加する</button></div>`;
+      <button class="btn btn-primary" style="width:auto" onclick="focusParticipantForm()">＋ 最初の関係者を追加する</button></div>`;
     return;
   }
   el.innerHTML = appState.participants.map(p => {
     const label = p.display_name ? `${p.log_name}（${p.display_name}）` : p.log_name;
     const relLabel = p.relationship_types?.label_ja || '—';
+    const selected = appState.prepSelected.includes(p.id);
     return `
-    <div class="card" style="margin-bottom:12px;max-width:720px" id="pcard-${p.id}">
+    <div class="card" style="margin-bottom:12px;max-width:720px;${selected ? 'border-color:#93C5FD;box-shadow:0 4px 14px rgba(37,99,235,.08)' : ''}" id="pcard-${p.id}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
             <span style="font-weight:700;font-size:15px">${escapeHtml(label)}</span>
             <span style="font-size:11px;background:var(--accent-light);color:var(--accent);border:1px solid #BFDBFE;padding:2px 8px;border-radius:12px;white-space:nowrap">${escapeHtml(relLabel)}</span>
+            ${selected ? '<span style="font-size:11px;background:#ECFDF5;color:var(--success);border:1px solid #A7F3D0;padding:2px 8px;border-radius:12px;white-space:nowrap">会議準備に選択中</span>' : ''}
           </div>
           ${p.context_note ? `<p style="font-size:13px;color:var(--muted);line-height:1.6;margin:0;white-space:pre-wrap">${escapeHtml(p.context_note)}</p>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn btn-primary btn-sm" style="width:auto" onclick="startPrepForParticipant('${p.id}')">この人で準備する</button>
           <button class="btn btn-outline btn-sm" style="width:auto" onclick="openEditParticipant('${p.id}')">編集</button>
           <button class="btn btn-sm" style="width:auto;background:#FEE2E2;color:var(--danger);border:1px solid #FCA5A5" onclick="deleteParticipant('${p.id}')">削除</button>
         </div>
@@ -2618,20 +2660,21 @@ function renderParticipantsList() {
   }).join('');
 }
 
-function toggleParticipantForm() {
-  const form = document.getElementById('participant-form');
-  const label = document.getElementById('participant-form-toggle-label');
-  if (!form) return;
-  const open = form.style.display !== 'none';
-  form.style.display = open ? 'none' : 'block';
-  label.textContent = open ? 'フォームを開く' : '閉じる';
-  if (!open) {
-    document.getElementById('pform-log-name').value = '';
-    document.getElementById('pform-display-name').value = '';
-    document.getElementById('pform-context').value = '';
-    populateRelationshipSelect('pform-relationship');
-    document.getElementById('pform-log-name').focus();
-  }
+function resetParticipantForm() {
+  document.getElementById('pform-log-name').value = '';
+  document.getElementById('pform-display-name').value = '';
+  document.getElementById('pform-context').value = '';
+  populateRelationshipSelect('pform-relationship');
+}
+
+function focusParticipantForm() {
+  resetParticipantForm();
+  document.getElementById('pform-log-name').focus();
+}
+
+function updateParticipantsPageFocus() {
+  const input = document.getElementById('pform-log-name');
+  if (input && !appState.participants.length) input.focus();
 }
 
 async function saveParticipant() {
@@ -2648,8 +2691,12 @@ async function saveParticipant() {
   try {
     const created = await dbSaveParticipant({ logName, displayName, relationshipTypeId, contextNote });
     appState.participants.unshift(created);
-    toggleParticipantForm();
+    resetParticipantForm();
     renderParticipantsList();
+    renderPrepPage();
+    al.textContent = `✅ 「${created.display_name || created.log_name}」を登録しました。下の一覧からそのまま会議準備に進めます。`;
+    al.className = 'alert alert-success show';
+    document.getElementById('pform-log-name').focus();
   } catch(e) {
     showAlert(al, e.message.includes('unique') ? 'その呼称はすでに登録済みです' : '保存に失敗しました: ' + e.message);
   }
@@ -2681,6 +2728,7 @@ async function updateParticipant(id) {
     const idx = appState.participants.findIndex(p => p.id === id);
     if (idx >= 0) appState.participants[idx] = updated;
     renderParticipantsList();
+    renderPrepPage();
   } catch(e) {
     showAlert(al, '更新に失敗しました: ' + e.message);
   }
@@ -2694,9 +2742,18 @@ async function deleteParticipant(id) {
     appState.participants = appState.participants.filter(p => p.id !== id);
     appState.prepSelected = appState.prepSelected.filter(x => x !== id);
     renderParticipantsList();
+    renderPrepPage();
   } catch(e) {
     showAlert(al, '削除に失敗しました: ' + e.message);
   }
+}
+
+function startPrepForParticipant(id) {
+  appState.prepSelected = [id];
+  navigate('prep');
+  renderPrepPage();
+  const goalInput = document.getElementById('prep-goal');
+  if (goalInput) goalInput.focus();
 }
 
 // ===== HR DASHBOARD =====
